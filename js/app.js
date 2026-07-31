@@ -31,43 +31,64 @@
     const m = String(name).match(/第\s*(\d+)\s*周/);
     return m ? parseInt(m[1], 10) : 4;
   }
+  // 自动推断归属周期：报告针对「刚结束的那一周」——取本周日之前最近的一个周日（今天就是周日则用今天）
+  function inferPeriod() {
+    const now = new Date();
+    const dow = now.getDay(); // 0=周日
+    const ref = new Date(now);
+    if (dow !== 0) ref.setDate(now.getDate() - dow);
+    return { year: ref.getFullYear(), month: ref.getMonth() + 1, week: Math.ceil(ref.getDate() / 7) };
+  }
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
   function updateCount() { $('#recordCount').textContent = STORE.readAll().length + ' 条记录'; }
 
   // —— 上传面板（通用）——
   function uploadPanelHTML(stream) {
-    const now = new Date();
-    const y = now.getFullYear(), m = now.getMonth() + 1;
     const names = { weekly: 'DOS 周报', kezu: '科组周报', kpi: '教师周报' };
     const desc = stream === 'weekly'
       ? '上传 DOS 周报 xlsx（含「数据统计表」工作表），按标签一键提取。'
       : '上传' + names[stream] + ' xlsx（首行表头，每行一个' + (stream === 'kezu' ? '科组' : '教师') + '），按表头一键提取。';
+    const p = inferPeriod();
+    const defaultLabel = (stream === 'weekly' ? (p.year + '年' + p.month + '月 ') : '') + '第' + p.week + '周';
+    const uploadIco = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>';
     return `
       <div class="panel">
         <div class="panel-title">上传并一键提取 · ${names[stream]}</div>
         <div class="panel-desc">${desc}</div>
-        <div class="drop" id="drop_${stream}">
-          拖入文件，或 <b>点击选择 xlsx</b>
+        <div class="upload-bar" id="drop_${stream}">
+          <div class="ub-left">
+            <div class="ub-ico" id="ubico_${stream}">${uploadIco}</div>
+            <div>
+              <div class="ub-title">拖入或点击上传 ${names[stream]} xlsx</div>
+              <div class="ub-sub" id="filelabel_${stream}">默认归属：<b>${defaultLabel}</b> · 可修改</div>
+            </div>
+          </div>
+          <div class="ub-actions"><button class="btn primary" id="extract_${stream}">一键提取</button></div>
           <input type="file" id="file_${stream}" accept=".xlsx,.xls" hidden />
         </div>
-        <div class="row" style="margin-top:14px">
-          <div class="field"><label>年份</label><input type="number" id="yr_${stream}" value="${y}" min="2000" max="2100" style="min-width:80px"/></div>
-          <div class="field"><label>月份</label><input type="number" id="mo_${stream}" value="${m}" min="1" max="12" style="min-width:70px"/></div>
-          <div class="field"><label>周序号</label><input type="number" id="wk_${stream}" value="4" min="1" max="6" style="min-width:70px"/></div>
-          <div class="field"><label>&nbsp;</label><button class="btn primary" id="extract_${stream}">一键提取</button></div>
+        <div class="meta-row">
+          <div class="field"><label>年份</label><input type="number" id="yr_${stream}" value="${p.year}" min="2000" max="2100" style="min-width:72px"/></div>
+          <div class="field"><label>月份</label><input type="number" id="mo_${stream}" value="${p.month}" min="1" max="12" style="min-width:64px"/></div>
+          <div class="field"><label>周序号</label><input type="number" id="wk_${stream}" value="${p.week}" min="1" max="6" style="min-width:64px"/></div>
         </div>
         <div id="preview_${stream}"></div>
       </div>`;
   }
 
+  function markFile(stream, file) {
+    const bar = $('#drop_' + stream), lbl = $('#filelabel_' + stream);
+    if (bar) bar.classList.add('has-file');
+    if (lbl) lbl.innerHTML = '已选文件：<b>' + file.name + '</b> · 点击重新选择';
+  }
   function wireUpload(stream) {
     const drop = $('#drop_' + stream), fileInput = $('#file_' + stream);
-    drop.addEventListener('click', () => fileInput.click());
+    drop.addEventListener('click', e => { if (e.target.closest('button')) return; fileInput.click(); });
     drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
     drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
-    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('drag'); if (e.dataTransfer.files[0]) handleFile(stream, e.dataTransfer.files[0]); });
-    fileInput.addEventListener('change', e => { if (e.target.files[0]) handleFile(stream, e.target.files[0]); });
-    $('#extract_' + stream).addEventListener('click', () => {
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('drag'); if (e.dataTransfer.files[0]) { markFile(stream, e.dataTransfer.files[0]); handleFile(stream, e.dataTransfer.files[0]); } });
+    fileInput.addEventListener('change', e => { if (e.target.files[0]) { markFile(stream, e.target.files[0]); handleFile(stream, e.target.files[0]); } });
+    $('#extract_' + stream).addEventListener('click', e => {
+      e.stopPropagation();
       const f = fileInput.files[0];
       if (!f) { toast('请先选择文件'); return; }
       handleFile(stream, f);
@@ -145,36 +166,67 @@
 
   // —— 周报视图 ——
   function renderWeekly() {
+    const recs = STORE.list('weekly').sort((a, b) => (b.year - a.year) || (b.month - b.month) || (b.week - b.week));
     let html = uploadPanelHTML('weekly');
-    const recs = STORE.list('weekly').sort((a, b) => (b.year - a.year) || (b.month - a.month) || (b.week - a.week));
+
+    if (recs.length) html += renderHeroStats(recs[0], recs[1] || null);
+
     html += '<div class="panel"><div class="panel-title">已录入周报（' + recs.length + '）</div>';
     html += '<div class="panel-desc">每月最后一周（周序号=当月周数）自动标记为「月度周报」，供对比中心与五项满意度使用。</div>';
-    if (!recs.length) html += '<div class="empty">还没有周报，先上传一份 DOS 周报。</div>';
-    else {
-      html += '<div class="table-wrap"><table><thead><tr><th>年份</th><th>月份</th><th>周</th><th>校区</th><th>标记</th><th>操作</th></tr></thead><tbody>';
+    const p = inferPeriod();
+    if (!recs.length) {
+      html += '<div class="empty">还没有 <b>' + p.year + '年' + p.month + '月 第' + p.week + '周</b> 的 DOS 周报。' +
+        '<div class="empty-cta">上传一份周报，即可开始月度 / 季度对比分析。</div></div>';
+    } else {
+      html += '<div class="rec-list">';
       recs.forEach((r, i) => {
         const isME = r.values.weekSeq != null && r.values.totalWeeksOfMonth != null && r.values.weekSeq === r.values.totalWeeksOfMonth;
-        html += '<tr data-rec="' + i + '"><td>' + r.year + '</td><td>' + r.month + '</td><td>第' + r.week + '周</td><td>' + (r.campus || '—') + '</td>' +
-          '<td>' + (isME ? '<span class="tag me">月度周报</span>' : '<span class="muted">周报</span>') + '</td>' +
-          '<td><button class="btn sm ghost act-view">查看</button> <button class="btn sm ghost act-del">删除</button></td></tr>';
-        html += '<tr class="detail-row" id="detail_' + i + '" style="display:none"><td colspan="6"></td></tr>';
+        html += '<div class="rec-row ' + (isME ? 'is-me' : '') + '" data-rec="' + i + '">' +
+          '<div class="bar"></div>' +
+          '<div class="period">' + r.year + '年' + r.month + '月 第' + r.week + '周<span class="sub">' + (r.campus || '—') + '</span></div>' +
+          '<div>' + (isME ? '<span class="tag ok">月度周报</span>' : '<span class="tag">周报</span>') + '</div>' +
+          '<div class="ops"><button class="btn sm ghost act-view">查看</button><button class="btn sm ghost act-del">删除</button></div>' +
+          '</div>';
+        html += '<div class="rec-detail" id="detail_' + i + '" style="display:none"></div>';
       });
-      html += '</tbody></table></div>';
+      html += '</div>';
     }
     html += '</div>';
     $('#content').innerHTML = html;
     wireUpload('weekly');
-    // 事件
     $all('.act-view').forEach(b => b.addEventListener('click', () => {
-      const i = b.closest('tr').dataset.rec; const r = recs[i];
+      const i = b.closest('.rec-row').dataset.rec; const r = recs[i];
       const dr = $('#detail_' + i);
-      dr.style.display = dr.style.display === 'none' ? '' : 'none';
-      if (dr.style.display === '') dr.querySelector('td').innerHTML = weeklyDetailHTML(r);
+      dr.style.display = dr.style.display === 'none' ? 'block' : 'none';
+      if (dr.style.display === 'block') dr.innerHTML = weeklyDetailHTML(r);
     }));
     $all('.act-del').forEach(b => b.addEventListener('click', () => {
-      const i = b.closest('tr').dataset.rec; const r = recs[i];
+      const i = b.closest('.rec-row').dataset.rec; const r = recs[i];
       STORE.remove('weekly', r.year, r.month, r.week); toast('已删除'); renderWeekly(); updateCount();
     }));
+  }
+
+  function heroStat(k, v, delta, isRatio) {
+    let dClass = 'flat', dTxt = '— 暂无上周对比';
+    if (delta != null) {
+      const up = delta > 0, down = delta < 0;
+      dClass = up ? 'up' : (down ? 'down' : 'flat');
+      const dv = isRatio ? (delta * 100).toFixed(1) + ' pp' : (delta >= 0 ? '+' : '') + fmt(delta);
+      dTxt = (up ? '▲ ' : down ? '▼ ' : '') + dv + ' 环比上周';
+    }
+    return '<div class="stat-card"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="delta ' + dClass + '">' + dTxt + '</div></div>';
+  }
+  function renderHeroStats(latest, prev) {
+    const v = latest.values, pv = prev ? prev.values : null;
+    const produced = (v.v1WeekProduced || 0) + (v.v6WeekProduced || 0);
+    const pProduced = pv ? ((pv.v1WeekProduced || 0) + (pv.v6WeekProduced || 0)) : null;
+    const cards = [
+      heroStat('周课时生产', fmt(produced), pProduced == null ? null : produced - pProduced, false),
+      heroStat('周完成率（1V1）', pct(v.v1WeekRate), pv ? (v.v1WeekRate - pv.v1WeekRate) : null, true),
+      heroStat('周续费率（人数）', pct(v.xfWeekNumRate), pv ? (v.xfWeekNumRate - pv.xfWeekNumRate) : null, true),
+      heroStat('校周均', fmt(v.schoolWeekAvg, 1), pv ? (v.schoolWeekAvg - pv.schoolWeekAvg) : null, false),
+    ];
+    return '<div class="stat-grid">' + cards.join('') + '</div>';
   }
 
   function weeklyDetailHTML(r) {
@@ -199,7 +251,7 @@
     if (!monthly.length) html += '<div class="empty">还没有科组周报，先上传「科组周报」。</div>';
     else {
       html += '<div class="table-wrap"><table><thead><tr><th>年</th><th>月</th><th>科组</th><th class="num">单科数</th><th class="num">课时</th><th class="num">周平均</th><th class="num">结课单科</th><th class="num">退费单科</th><th class="num">停课单科</th><th class="num">续费单科</th><th class="num">推荐单科</th><th class="num">教师数</th></tr></thead><tbody>';
-      monthly.sort((a, b) => (b.year - a.year) || (b.month - a.month) || a.dimension.localeCompare(b.dimension)).forEach(r => {
+      monthly.sort((a, b) => (b.year - a.year) || (b.month - b.month) || a.dimension.localeCompare(b.dimension)).forEach(r => {
         const v = r.values;
         html += '<tr><td>' + r.year + '</td><td>' + r.month + '</td><td>' + r.dimension + '</td>' +
           '<td class="num">' + fmt(v.subjects) + '</td><td class="num">' + fmt(v.hours) + '</td><td class="num">' + fmt(v.weekAvg, 2) + '</td>' +
@@ -490,17 +542,6 @@
 
   function init() {
     $all('.nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
-    $('#btnExport').addEventListener('click', () => {
-      const blob = new Blob([STORE.exportJSON()], { type: 'application/json' });
-      const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = 'data.json'; a.click();
-    });
-    $('#btnImport').addEventListener('click', () => $('#importFile').click());
-    $('#importFile').addEventListener('change', e => {
-      const f = e.target.files[0]; if (!f) return;
-      const rd = new FileReader();
-      rd.onload = () => { try { const n = STORE.importJSON(rd.result); toast('已导入 ' + n + ' 条'); go(currentTab); updateCount(); } catch (err) { toast('导入失败：' + err.message); } };
-      rd.readAsText(f);
-    });
     go('weekly');
     updateCount();
   }

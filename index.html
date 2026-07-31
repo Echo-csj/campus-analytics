@@ -6,26 +6,28 @@
   <title>校区教学数据分析工作台</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="styles.css?v=20260731a" />
+  <link rel="stylesheet" href="styles.css?v=20260731b" />
 </head>
 <body>
   <div id="app">
     <aside class="sidebar">
       <div class="brand">
-        <div class="brand-mark">A</div>
+        <div class="brand-mark">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12 L6 7 L9 10 L14 4"/><path d="M2 14 H14"/></svg>
+        </div>
         <div class="brand-text">
           <div class="brand-title">教学数据分析</div>
           <div class="brand-sub">泉山校区 · 工作台</div>
         </div>
       </div>
       <nav id="nav">
-        <button class="nav-item active" data-tab="weekly"><span class="dot"></span>周报</button>
-        <button class="nav-item" data-tab="kezu"><span class="dot"></span>最佳科组</button>
-        <button class="nav-item" data-tab="kpi"><span class="dot"></span>教师 KPI</button>
-        <button class="nav-item" data-tab="satisfaction"><span class="dot"></span>五项满意度</button>
-        <button class="nav-item" data-tab="compare"><span class="dot"></span>对比中心</button>
-        <button class="nav-item" data-tab="templates"><span class="dot"></span>模板中心</button>
-        <button class="nav-item" data-tab="data"><span class="dot"></span>数据备份</button>
+        <button class="nav-item active" data-tab="weekly">周报</button>
+        <button class="nav-item" data-tab="kezu">最佳科组</button>
+        <button class="nav-item" data-tab="kpi">教师 KPI</button>
+        <button class="nav-item" data-tab="satisfaction">五项满意度</button>
+        <button class="nav-item" data-tab="compare">对比中心</button>
+        <button class="nav-item" data-tab="templates">模板中心</button>
+        <button class="nav-item" data-tab="data">数据备份</button>
       </nav>
       <div class="sidebar-foot">
         <div class="hint" id="recordCount">0 条记录</div>
@@ -36,11 +38,7 @@
     <main class="main">
       <header class="topbar">
         <div class="topbar-title" id="tabTitle">周报</div>
-        <div class="topbar-actions">
-          <button class="btn ghost" id="btnExport">导出 data.json</button>
-          <button class="btn primary" id="btnImport">导入</button>
-          <input type="file" id="importFile" accept=".json" hidden />
-        </div>
+        <div class="topbar-actions" id="ctxActions"></div>
       </header>
 
       <section class="content" id="content"><!-- 渲染区 --></section>
@@ -49,15 +47,15 @@
 
   <div id="toast" class="toast"></div>
 
-  <script src="vendor/xlsx.full.min.js?v=20260731a"></script>
-  <script src="vendor/chart.umd.js?v=20260731a"></script>
-  <script src="js/schema.js?v=20260731a"></script>
-  <script src="js/rulebook.js?v=20260731a"></script>
-  <script src="js/templates.js?v=20260731a"></script>
-  <script src="js/store.js?v=20260731a"></script>
-  <script src="js/parser.js?v=20260731a"></script>
-  <script src="js/aggregate.js?v=20260731a"></script>
-  <script src="js/sample-data.js?v=20260731a"></script>
-  <script src="js/app.js?v=20260731a"></script>
+  <script src="vendor/xlsx.full.min.js?v=20260731b"></script>
+  <script src="vendor/chart.umd.js?v=20260731b"></script>
+  <script src="js/schema.js?v=20260731b"></script>
+  <script src="js/rulebook.js?v=20260731b"></script>
+  <script src="js/templates.js?v=20260731b"></script>
+  <script src="js/store.js?v=20260731b"></script>
+  <script src="js/parser.js?v=20260731b"></script>
+  <script src="js/aggregate.js?v=20260731b"></script>
+  <script src="js/sample-data.js?v=20260731b"></script>
+  <script src="js/app.js?v=20260731b"></script>
 </body>
 </html>
