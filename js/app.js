@@ -169,14 +169,14 @@
     const recs = STORE.list('weekly').sort((a, b) => (b.year - a.year) || (b.month - b.month) || (b.week - b.week));
     let html = uploadPanelHTML('weekly');
 
-    if (recs.length) html += renderHeroStats(recs[0], recs[1] || null);
+    html += renderHeroStats(recs[0] || null, recs[1] || null);
 
     html += '<div class="panel"><div class="panel-title">已录入周报（' + recs.length + '）</div>';
     html += '<div class="panel-desc">每月最后一周（周序号=当月周数）自动标记为「月度周报」，供对比中心与五项满意度使用。</div>';
     const p = inferPeriod();
     if (!recs.length) {
       html += '<div class="empty">还没有 <b>' + p.year + '年' + p.month + '月 第' + p.week + '周</b> 的 DOS 周报。' +
-        '<div class="empty-cta">上传一份周报，即可开始月度 / 季度对比分析。</div></div>';
+        '<div class="empty-cta">上传一份周报，或去「数据备份 → 载入示例数据」查看效果。</div></div>';
     } else {
       html += '<div class="rec-list">';
       recs.forEach((r, i) => {
@@ -206,8 +206,8 @@
     }));
   }
 
-  function heroStat(k, v, delta, isRatio) {
-    let dClass = 'flat', dTxt = '— 暂无上周对比';
+  function heroStat(k, v, delta, isRatio, emptyNote) {
+    let dClass = 'flat', dTxt = emptyNote || '— 暂无上周对比';
     if (delta != null) {
       const up = delta > 0, down = delta < 0;
       dClass = up ? 'up' : (down ? 'down' : 'flat');
@@ -217,6 +217,15 @@
     return '<div class="stat-card"><div class="k">' + k + '</div><div class="v">' + v + '</div><div class="delta ' + dClass + '">' + dTxt + '</div></div>';
   }
   function renderHeroStats(latest, prev) {
+    if (!latest) {
+      const cards = [
+        heroStat('周课时生产', '—', null, false, '上传周报后显示'),
+        heroStat('周完成率（1V1）', '—', null, true, '上传周报后显示'),
+        heroStat('周续费率（人数）', '—', null, true, '上传周报后显示'),
+        heroStat('校周均', '—', null, false, '上传周报后显示'),
+      ];
+      return '<div class="stat-grid">' + cards.join('') + '</div>';
+    }
     const v = latest.values, pv = prev ? prev.values : null;
     const produced = (v.v1WeekProduced || 0) + (v.v6WeekProduced || 0);
     const pProduced = pv ? ((pv.v1WeekProduced || 0) + (pv.v6WeekProduced || 0)) : null;
