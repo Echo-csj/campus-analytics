@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>校区教学数据分析工作台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">A</div>
+        <div class="brand-text">
+          <div class="brand-title">教学数据分析</div>
+          <div class="brand-sub">泉山校区 · 工作台</div>
+        </div>
+      </div>
+      <nav id="nav">
+        <button class="nav-item active" data-tab="weekly"><span class="dot"></span>周报</button>
+        <button class="nav-item" data-tab="kezu"><span class="dot"></span>最佳科组</button>
+        <button class="nav-item" data-tab="kpi"><span class="dot"></span>教师 KPI</button>
+        <button class="nav-item" data-tab="satisfaction"><span class="dot"></span>五项满意度</button>
+        <button class="nav-item" data-tab="compare"><span class="dot"></span>对比中心</button>
+        <button class="nav-item" data-tab="templates"><span class="dot"></span>模板中心</button>
+        <button class="nav-item" data-tab="data"><span class="dot"></span>数据备份</button>
+      </nav>
+      <div class="sidebar-foot">
+        <div class="hint" id="recordCount">0 条记录</div>
+        <div class="hint small">数据保存在本浏览器</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="topbar-title" id="tabTitle">周报</div>
+        <div class="topbar-actions">
+          <button class="btn ghost" id="btnExport">导出 data.json</button>
+          <button class="btn primary" id="btnImport">导入</button>
+          <input type="file" id="importFile" accept=".json" hidden />
+        </div>
+      </header>
+
+      <section class="content" id="content"><!-- 渲染区 --></section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast"></div>
+
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="vendor/chart.umd.js"></script>
+  <script src="js/schema.js"></script>
+  <script src="js/rulebook.js"></script>
+  <script src="js/templates.js"></script>
+  <script src="js/store.js"></script>
+  <script src="js/parser.js"></script>
+  <script src="js/aggregate.js"></script>
+  <script src="js/sample-data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
