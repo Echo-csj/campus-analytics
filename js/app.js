@@ -479,13 +479,14 @@
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
     let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">横向对比 = 下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」。对比<b>直接按各周报「数据统计表」的原始事项逐行对齐</b>，事项不一致时多出来的项留空。若下方显示「暂无数据」，先用上方面板入库对应周期的周报。</div>';
+    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」，按各周报「数据统计表」原始事项逐行对齐、差异留空）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用上方「历史周报批量入库」入库对应周期周报。</div>';
     html += compareUploadPanelHTML();
     html += '<div class="row">';
-    html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option></select></div>';
+    html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option><option value="qsummary">季度汇总（季度数据汇总）</option></select></div>';
     html += '<div class="field"><label>年份</label><select id="cmpYear">' + years.concat([yr]).filter((v, i, a) => a.indexOf(v) === i).map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '</option>').join('') + '</select></div>';
     html += '<div class="field" id="cmpMonthField"><label>月份</label><select id="cmpMonth">' + Array.from({ length: 12 }, (_, i) => '<option value="' + (i + 1) + '"' + (i + 1 === now.getMonth() + 1 ? ' selected' : '') + '>' + (i + 1) + '月</option>').join('') + '</select></div>';
     html += '<div class="field" id="cmpQuarterField" style="display:none"><label>季度</label><select id="cmpQuarter">' + [1, 2, 3, 4].map(q => '<option value="' + q + '">Q' + q + '</option>').join('') + '</select></div>';
+    html += '<button class="btn" id="cmpQExport" style="display:none">导出季度汇总 xlsx</button>';
     html += '</div>';
     html += '<div id="cmpResult"></div></div>';
     $('#content').innerHTML = html;
@@ -493,15 +494,22 @@
 
     const typeSel = $('#cmpType'), yrSel = $('#cmpYear'), moSel = $('#cmpMonth'), qSel = $('#cmpQuarter');
     function toggle() {
-      $('#cmpMonthField').style.display = typeSel.value === 'month' ? '' : 'none';
-      $('#cmpQuarterField').style.display = typeSel.value === 'quarter' ? '' : 'none';
+      const t = typeSel.value;
+      $('#cmpMonthField').style.display = t === 'month' ? '' : 'none';
+      $('#cmpQuarterField').style.display = (t === 'quarter' || t === 'qsummary') ? '' : 'none';
+      $('#cmpQExport').style.display = t === 'qsummary' ? '' : 'none';
     }
     typeSel.addEventListener('change', () => { toggle(); draw(); });
     [yrSel, moSel, qSel].forEach(s => s.addEventListener('change', draw));
     toggle();
 
+    $('#cmpQExport').addEventListener('click', () => {
+      if (typeSel.value !== 'qsummary') return;
+      exportQuarterXLSX(parseInt(yrSel.value, 10), parseInt(qSel.value, 10));
+    });
     function draw() {
       const type = typeSel.value, y = parseInt(yrSel.value, 10);
+      if (type === 'qsummary') { renderQuarterTable(y, parseInt(qSel.value, 10), '#cmpResult'); return; }
       let cmp;
       if (type === 'month') cmp = AGG.compareMonthly(recs, y, parseInt(moSel.value, 10));
       else if (type === 'quarter') cmp = AGG.compareQuarter(recs, y, parseInt(qSel.value, 10));
@@ -557,38 +565,13 @@
     return fmt(val);
   }
 
-  // —— 季度汇总（按《季度数据统计标准》）——
-  function renderQuarter() {
-    const recs = STORE.list('weekly');
-    const opts = AGG.quarterOptions(recs);
-    const now = new Date();
-    const defY = opts.length ? opts[0].year : now.getFullYear();
-    const defQ = opts.length ? opts[0].quarter : Math.floor(now.getMonth() / 3) + 1;
-    let html = '<div class="panel"><div class="panel-title">季度汇总（按《季度数据统计标准》）</div>';
-    html += '<div class="panel-desc">季度数据由各月「月度周报」（每月最后一周 DOS 周报，其「月」口径字段即当月累计值）自动汇总，<b>无需单独上传月度文件</b>。规则：<b>last</b>=季末月数据｜<b>sum</b>=三月之和｜<b>avg</b>=三月平均｜<b>派生</b>=依公式计算（比率基数为季末快照）。</div>';
-    if (!opts.length) {
-      html += '<div class="empty">尚无「月度周报」数据。请先在「周报」上传各月最后一周的 DOS 周报，或在「对比中心 → 历史周报批量入库」一次入库多份。</div></div>';
-      $('#content').innerHTML = html; return;
-    }
-    const years = [...new Set(opts.map(o => o.year))].sort((a, b) => b - a);
-    html += '<div class="row">';
-    html += '<div class="field"><label>年份</label><select id="qYr">' + years.map(y => '<option value="' + y + '"' + (y === defY ? ' selected' : '') + '>' + y + '</option>').join('') + '</select></div>';
-    html += '<div class="field"><label>季度</label><select id="qQ">' + [1, 2, 3, 4].map(q => '<option value="' + q + '"' + (q === defQ ? ' selected' : '') + '>Q' + q + '</option>').join('') + '</select></div>';
-    html += '<button class="btn" id="qExport">导出季度汇总 xlsx</button>';
-    html += '</div><div id="qResult"></div></div>';
-    $('#content').innerHTML = html;
-    const yrSel = $('#qYr'), qSel = $('#qQ');
-    function draw() { renderQuarterTable(parseInt(yrSel.value, 10), parseInt(qSel.value, 10)); }
-    yrSel.addEventListener('change', draw);
-    qSel.addEventListener('change', draw);
-    $('#qExport').addEventListener('click', () => exportQuarterXLSX(parseInt(yrSel.value, 10), parseInt(qSel.value, 10)));
-    draw();
-  }
+  // —— 季度汇总（按《季度数据统计标准》）—— 已并入「对比中心」的「季度汇总」对比类型
 
-  function renderQuarterTable(year, quarter) {
+  function renderQuarterTable(year, quarter, target) {
+    const el = $(target || '#cmpResult');
     const recs = STORE.list('weekly');
     const g = AGG.quarterlyAggregate(recs).find(x => x.year === year && x.quarter === quarter);
-    if (!g) { $('#qResult').innerHTML = '<div class="empty">该季度暂无数据（需先有该季各月月度周报）。</div>'; return; }
+    if (!g) { el.innerHTML = '<div class="empty">该季度暂无数据（需先有该季各月月度周报）。</div>'; return; }
     const v = g.values;
     const heroes = [
       heroStat('季度1V1生产课时', fmt(v.v1MonthProduced), null, false),
@@ -607,7 +590,7 @@
     });
     html += '</tbody></table></div>';
     html += '<div class="preview-note">说明：派生字段（依公式计算）的<span class="ok">比率基数取季末快照</span>（在读学员/单科、教师数均为「最后一个月」），分子为三月之和；若与你的口径不同，告诉我即可调整。</div>';
-    $('#qResult').innerHTML = html;
+    el.innerHTML = html;
   }
 
   function exportQuarterXLSX(year, quarter) {
@@ -745,7 +728,6 @@
     kpi: { title: '教师 KPI', render: renderKpi },
     satisfaction: { title: '五项满意度', render: renderSatisfaction },
     compare: { title: '对比中心', render: renderCompare },
-    quarter: { title: '季度汇总', render: renderQuarter },
     templates: { title: '模板中心', render: renderTemplates },
     data: { title: '数据备份', render: renderData },
   };
