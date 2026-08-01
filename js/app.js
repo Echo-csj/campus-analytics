@@ -583,13 +583,13 @@
     let note = '数据来源：' + year + '年 ' + g.sourceMonths.map(m => m + '月').join('、') + ' 月度周报。';
     if (g.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + g.missingMonths.map(m => m + '月').join('、') + ' 月度周报，当前按现有月汇总，结果可能不完整。</span>';
     html += '<div class="preview-note">' + note + '</div>';
-    html += '<div class="table-wrap"><table><thead><tr><th>月度原数据</th><th class="num">季度数据</th><th>季度数据填写标准</th></tr></thead><tbody>';
+    html += '<div class="table-wrap"><table><thead><tr><th>季度数据（名称）</th><th class="num">季度数据值</th><th>季度数据填写标准</th></tr></thead><tbody>';
     AGG.QUARTERLY_RULES.forEach(r => {
-      html += '<tr><td>' + esc(r.label) + '</td><td class="num">' + fmtQ(r.key, v[r.key]) + '</td>' +
+      html += '<tr><td><div class="q-name">' + esc(r.label) + '</div><div class="q-src">月度原数据：' + esc(r.src) + '</div></td><td class="num">' + fmtQ(r.key, v[r.key]) + '</td>' +
         '<td style="color:#71717a;font-size:12.5px">' + esc(r.ruleText) + '</td></tr>';
     });
     html += '</tbody></table></div>';
-    html += '<div class="preview-note">说明：派生字段（依公式计算）的<span class="ok">比率基数取季末快照</span>（在读学员/单科、教师数均为「最后一个月」），分子为三月之和；若与你的口径不同，告诉我即可调整。</div>';
+    html += '<div class="preview-note">说明：依你最新标准——<span class="ok">续/推/结/退各率、停课率、骨干/双三占比、现金均价、停课/骨干/双三人数、月人均效能值</span>均为<b>三个月平均</b>；仅<b>生产完成率、课时生产总现金、金额占比、离职人数率</b>四项仍按原表公式（=C…）计算。第一列「季度数据（名称）」取自标准表第二列，下方小字为第一列对应的月度原表名称。</div>';
     el.innerHTML = html;
   }
 
@@ -597,7 +597,7 @@
     const g = AGG.quarterlyAggregate(STORE.list('weekly')).find(x => x.year === year && x.quarter === quarter);
     if (!g) { toast('该季度暂无数据'); return; }
     const v = g.values;
-    const aoa = [['月度原数据', '季度数据', '季度数据填写标准']];
+    const aoa = [['季度数据（名称）', '季度数据值', '月度原数据对应', '季度数据填写标准']];
     AGG.QUARTERLY_RULES.forEach(r => {
       let cv = v[r.key];
       if (cv != null) {
@@ -605,7 +605,7 @@
         if (f && f.type === 'ratio' && f.unit !== '比') cv = (cv * 100).toFixed(2) + '%';
         else if (f && f.type === 'ratio' && f.unit === '比') cv = +cv.toFixed(2);
       }
-      aoa.push([r.label, cv == null ? '' : cv, r.ruleText]);
+      aoa.push([r.label, cv == null ? '' : cv, r.src, r.ruleText]);
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
     const wb = XLSX.utils.book_new();

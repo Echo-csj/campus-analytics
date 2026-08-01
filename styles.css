@@ -134,6 +134,8 @@ td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numer
 .tag.ok { background: #dcfce7; color: var(--green); }
 .warn-cell { background: #fffbeb; color: var(--amber); }
 .muted { color: var(--text-3); }
+.q-name { font-weight: 600; color: var(--text-1); }
+.q-src { color: var(--text-3); font-size: 11.5px; margin-top: 2px; }
 
 /* Charts */
 .chart-box { height: 340px; position: relative; }
