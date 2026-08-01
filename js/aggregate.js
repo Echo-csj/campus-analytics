@@ -201,15 +201,16 @@
     return [...ys].sort((a, b) => a - b);
   }
 
-  // —— 季度汇总（依据《季度数据统计标准·数据统计表》）——
+  // —— 季度汇总（依据最新《季度数据统计标准·数据统计表》）——
   // 数据源：各月「月度周报」（每月最后一周 DOS 周报），其「月」口径字段即当月累计值。
-  // 规则：
-  //   last  = 当季度最后一个月的数据（取季内最大月份的那份月度周报）
-  //   sum   = 当季度三个月之和
-  //   avg   = 当季度三个月的平均值
-  //   derived = 派生（原表填 #VALUE!），按 expr 用已汇总的季度值计算
-  // 注：派生比率字段的「基数」采用季度末快照（在读学员/在读单科/教师数均为 last 规则），
-  //     分子为三个月之和，故 季度率 = 季度分子 / 季度末基数。
+  // 规则（严格对齐标准表 col C「季度数据填写标准」）：
+  //   last    = 当季度最后一个月的数据（取季内最大月份的那份月度周报）
+  //   sum     = 当季度三个月之和
+  //   avg     = 当季度三个月的平均值（各类「率」直接对三个月的月度率取平均；
+  //             月人均效能值 = 各月(月课时生产总现金 / 校区总人数) 之平均）
+  //   derived = 仅 生产完成率 / 课时生产总现金 / 金额占比 / 离职人数率 四项仍按原表公式（=C…）
+  // 说明：最新标准已将「续费/推荐/结课/退费各率、停课率、骨干/双三占比、现金均价、停课人数、
+  //       骨干/双三人数、月人均效能值」全部改为「三个月平均」，不再用季度分子 / 季末基数相除。
   const QUARTERLY_RULES = [
     { key: 'teacherCount', label: '教师数', rule: 'last', ruleText: '当季度最后一个月的数据' },
     { key: 'campusTotal', label: '校区总人数', rule: 'last', ruleText: '当季度最后一个月的数据' },
@@ -224,38 +225,38 @@
     { key: 'v6MonthProduced', label: '1v6月生产课时', rule: 'sum', ruleText: '当季度三个月之和' },
     { key: 'v1MonthRate', label: '1V1月生产完成率', rule: 'derived', expr: 'v1MonthProduced / v1MonthTarget', ruleText: '当季度生产课时 / 当季度目标课时' },
     { key: 'v1MonthCash', label: '1v1月课时生产现金', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'v1MonthCashAvg', label: '1v1月课时生产现金均价', rule: 'last', ruleText: '当季度最后一个月的数据' },
+    { key: 'v1MonthCashAvg', label: '1v1月课时生产现金均价', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'v6MonthCash', label: '1v6月课时生产现金', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'monthCashTotal', label: '月课时生产总现金', rule: 'derived', expr: 'v1MonthCash + v6MonthCash', ruleText: '1v1月课时生产现金 + 1v6月课时生产现金' },
-    { key: 'v1MonthCashRatio', label: '1v1月课时生产金额占比', rule: 'derived', expr: 'v1MonthCash / monthCashTotal', ruleText: '1v1月课时生产现金 / 月课时生产总现金' },
-    { key: 'monthEff', label: '月人均效能值', rule: 'derived', expr: 'monthCashTotal / campusTotal', ruleText: '月课时生产总现金 / 校区总人数' },
+    { key: 'monthCashTotal', label: '月课时生产总现金', rule: 'derived', expr: 'v1MonthCash + v6MonthCash', ruleText: '1v1季度课时生产现金 + 1v6季度课时生产现金' },
+    { key: 'v1MonthCashRatio', label: '1v1月课时生产金额占比', rule: 'derived', expr: 'v1MonthCash / monthCashTotal', ruleText: '1v1季度课时生产现金 / 季度课时生产总现金' },
+    { key: 'monthEff', label: '月人均效能值', rule: 'avg', ruleText: '当季度三个月的平均值（各月 月课时生产总现金/校区总人数 之平均）' },
     { key: 'v1MonthUnitAvg', label: '1v1月单位周平均', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'monthSaturation', label: '月饱和度', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'xfMonthNum', label: '1V1月续费人数', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'xfMonthNumRate', label: '1V1月续费人数率', rule: 'derived', expr: 'xfMonthNum / v1Students', ruleText: '1V1月续费人数 / 1v1在读学员' },
+    { key: 'xfMonthNumRate', label: '1V1月续费人数率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'xfMonthSubj', label: '1V1月续费单科', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'xfMonthSubjRate', label: '1V1月续费单科率', rule: 'derived', expr: 'xfMonthSubj / v1Subjects', ruleText: '1V1月续费单科 / 1v1在读单科' },
+    { key: 'xfMonthSubjRate', label: '1V1月续费单科率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'tjMonthNum', label: '1V1月推荐人数', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'tjMonthNumRate', label: '1V1月推荐人数率', rule: 'derived', expr: 'tjMonthNum / v1Students', ruleText: '1V1月推荐人数 / 1v1在读学员' },
+    { key: 'tjMonthNumRate', label: '1V1月推荐人数率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'tjMonthSubj', label: '1V1月推荐单科', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'tjMonthSubjRate', label: '1V1月推荐单科率', rule: 'derived', expr: 'tjMonthSubj / v1Subjects', ruleText: '1V1月推荐单科 / 1v1在读单科' },
+    { key: 'tjMonthSubjRate', label: '1V1月推荐单科率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'jkMonthSubj', label: '1V1月结课单科', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'jkMonthSubjRate', label: '1V1月结课单科率', rule: 'derived', expr: 'jkMonthSubj / (v1Subjects + jkMonthSubj)', ruleText: '1V1月结课单科 / (1v1在读单科 + 1V1月结课单科)' },
+    { key: 'jkMonthSubjRate', label: '1V1月结课单科率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'jkMonthNum', label: '1V1月结课人数', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'jkMonthNumRate', label: '1V1月结课人数率', rule: 'derived', expr: 'jkMonthNum / (v1Students + jkMonthNum)', ruleText: '1V1月结课人数 / (1v1在读学员 + 1V1月结课人数)' },
+    { key: 'jkMonthNumRate', label: '1V1月结课人数率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'tfMonthSubj', label: '1V1月退费单科', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'tfMonthSubjRate', label: '1V1月退费单科率', rule: 'derived', expr: 'tfMonthSubj / (v1Subjects + tfMonthSubj)', ruleText: '1V1月退费单科 / (1v1在读单科 + 1V1月退费单科)' },
+    { key: 'tfMonthSubjRate', label: '1V1月退费单科率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'tfMonthNum', label: '1V1月退费人数', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'tfMonthNumRate', label: '1V1月退费人数率', rule: 'derived', expr: 'tfMonthNum / (tfMonthNum + v1Students)', ruleText: '1V1月退费人数 / (1V1月退费人数 + 1v1在读学员)' },
-    { key: 'tkNum', label: '1V1停课人数', rule: 'last', ruleText: '当季度最后一个月的数据' },
-    { key: 'tkNumRate', label: '1V1停课人数率', rule: 'last', ruleText: '当季度最后一个月的数据' },
+    { key: 'tfMonthNumRate', label: '1V1月退费人数率', rule: 'avg', ruleText: '当季度三个月的平均值' },
+    { key: 'tkNum', label: '1V1停课人数', rule: 'avg', ruleText: '当季度三个月的平均值' },
+    { key: 'tkNumRate', label: '1V1停课人数率', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'entryMonth', label: '月入职人数', rule: 'sum', ruleText: '当季度三个月之和' },
     { key: 'quitMonth', label: '月离职人数', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'quitMonthRate', label: '月离职人数率', rule: 'derived', expr: 'quitMonth / (teacherCount + quitMonth)', ruleText: '月离职人数 / (教师数 + 月离职人数)' },
-    { key: 'coreTeacherCount', label: '骨干教师人数', rule: 'last', ruleText: '当季度最后一个月的数据' },
-    { key: 'coreTeacherRatio', label: '骨干教师占比', rule: 'derived', expr: 'coreTeacherCount / teacherCount', ruleText: '骨干教师人数 / 教师数' },
-    { key: 'doubleThreeCount', label: '双三老师人数', rule: 'last', ruleText: '当季度最后一个月的数据' },
-    { key: 'doubleThreeRatio', label: '双三老师占比', rule: 'derived', expr: 'doubleThreeCount / teacherCount', ruleText: '双三老师人数 / 教师数' },
+    { key: 'quitMonthRate', label: '月离职人数率', rule: 'derived', expr: 'quitMonth / (teacherCount + quitMonth)', ruleText: '季度离职人数 / (教师数 + 季度离职人数)' },
+    { key: 'coreTeacherCount', label: '骨干教师人数', rule: 'avg', ruleText: '当季度三个月的平均值' },
+    { key: 'coreTeacherRatio', label: '骨干教师占比', rule: 'avg', ruleText: '当季度三个月的平均值' },
+    { key: 'doubleThreeCount', label: '双三老师人数', rule: 'avg', ruleText: '当季度三个月的平均值' },
+    { key: 'doubleThreeRatio', label: '双三老师占比', rule: 'avg', ruleText: '当季度三个月的平均值' },
   ];
 
   // 安全表达式求值：expr 仅引用已汇总到 q 的季度值键；任一依赖为 null → 结果 null
@@ -269,6 +270,20 @@
     try { r = fn(...args); } catch (e) { return null; }
     // 除零 / 缺失 → NaN → null
     return (typeof r === 'number' && isFinite(r)) ? r : null;
+  }
+
+  // 三个月平均：绝大多数 avg 字段直接取各月该键的值平均；
+  // 月人均效能值（monthEff）非月度直接字段，按各月 (月课时生产总现金 / 校区总人数) 取平均。
+  function avgMonthly(months, key) {
+    const vals = months.map(r => {
+      if (key === 'monthEff') {
+        const cash = (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0);
+        const pop = r.values.campusTotal;
+        return (pop != null && pop !== 0) ? cash / pop : null;
+      }
+      return r.values[key];
+    }).filter(v => v != null && isFinite(v));
+    return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }
 
   // 季度分组（按 年-季），返回可直接渲染的季度汇总记录
@@ -293,8 +308,7 @@
           const vals = g.months.map(r => r.values[rule.key]).filter(v => v != null && isFinite(v));
           qv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
         } else if (rule.rule === 'avg') {
-          const vals = g.months.map(r => r.values[rule.key]).filter(v => v != null && isFinite(v));
-          qv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
+          qv[rule.key] = avgMonthly(g.months, rule.key);
         }
       });
       // 第二遍：派生字段（定点迭代，按依赖顺序收敛）
