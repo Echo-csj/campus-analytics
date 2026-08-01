@@ -42,15 +42,21 @@
             const rawStr = (val == null ? '' : String(val).trim());
             const isPct = /[%％]/.test(rawStr);
             const num = toNum(val);
-            rows.push({ label: lab, raw: rawStr, num: num, isPct: isPct, text: rawStr });
+            // 对比图表统一用「百分数」坐标：带%号时 num 已是百分数(0.97/98)；
+            // 不带%号的小数(0.8823)实为小数，×100 得百分数(88.23)，与带%号口径对齐。
+            let cellNum = num;
+            if (f && f.type === 'ratio' && f.unit !== '比' && !isPct && typeof num === 'number') cellNum = num * 100;
+            rows.push({ label: lab, raw: rawStr, num: cellNum, isPct: isPct, text: rawStr });
             // 规范字段映射：精确匹配优先，否则大小写不敏感匹配
             let f = CA.SCHEMA.weeklyLabelMap[lab];
             if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
             if (f) {
               let n = (f.type === 'text') ? (val == null ? '' : String(val)) : num;
-              // 比例类字段：仅「率/占比」等百分数口径（unit ≠ '比'）在 >1 时按百分数归一为小数（98%→0.98）；
-              // 「比」类（如单科比 1.8）保持原值，避免误除。
-              if (f.type === 'ratio' && f.unit !== '比' && typeof n === 'number' && n > 1) n = n / 100;
+              // 比例类字段统一存为小数(0–1)：
+              //  · 原表带「%」号 → 必为百分数，直接 ÷100（98%→0.98，0.97%→0.0097）
+              //  · 无「%」号但 >1 → 兼容老数据按百分数处理 ÷100
+              //  · 无「%」号且 ≤1 → 视为已为小数/分数（如 7月周报的 0.8823；单科比经 unit 排除）
+              if (f.type === 'ratio' && f.unit !== '比' && (isPct || (typeof n === 'number' && n > 1))) n = n / 100;
               values[f.key] = n;
               if (f.key === 'weekSeq') weekSeq = n;
               if (f.key === 'totalWeeksOfMonth') totalWeeks = n;
@@ -99,10 +105,12 @@
               if (key) {
                 if (key === 'dimension') return;
                 const raw = row[ci];
+                const rawStr = (raw == null ? '' : String(raw).trim());
+                const rawHasPct = /[%％]/.test(rawStr);
                 let v = (raw == null ? null : (typeof raw === 'number' ? raw : (key === 'subjectGroup' ? String(raw) : toNum(raw))));
                 const fdef = fieldDef(key);
-                // 比例类字段：仅百分数口径（unit ≠ '比'）在 >1 时归一为小数；「比」类保持原值
-                if (fdef && fdef.type === 'ratio' && fdef.unit !== '比' && typeof v === 'number' && v > 1) v = v / 100;
+                // 比例类字段：带「%」号或 >1 时按百分数归一为小数（98%→0.98，0.97%→0.0097）；「比」类保持原值
+                if (fdef && fdef.type === 'ratio' && fdef.unit !== '比' && (rawHasPct || (typeof v === 'number' && v > 1))) v = v / 100;
                 vals[key] = v;
               } else if (h) {
                 if (!unmatchedCols.includes(h)) unmatchedCols.push(h);

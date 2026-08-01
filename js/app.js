@@ -26,7 +26,14 @@
     }
     return String(v);
   }
-  function pct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%'; }
+  function pct(v) {
+    if (v == null) return '—';
+    // 百分数显示：先消除浮点噪声再取 2 位小数，去尾随 0（98% / 0.97% / 88.24%）
+    const p = Math.round(v * 10000) / 100;
+    let s = p.toFixed(2);
+    if (s.indexOf('.') >= 0) s = s.replace(/\.?0+$/, '');
+    return s + '%';
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function parseFileWeek(name) {
     const m = String(name).match(/第\s*(\d+)\s*周/);
