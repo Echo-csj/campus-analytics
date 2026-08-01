@@ -359,6 +359,111 @@
     }
   }
 
+  // —— 对比中心 · 历史周报批量入库 ——
+  function compareUploadPanelHTML() {
+    const p = inferPeriod();
+    const uploadIco = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>';
+    return `
+      <div class="upload-card" id="cmpUpload">
+        <div class="uc-head">
+          <div class="uc-ico">${uploadIco}</div>
+          <div>
+            <div class="uc-title">历史周报批量入库</div>
+            <div class="uc-sub">一次性选入多份 DOS 周报（含各月「月度周报」），自动按文件名/内容判定年·月·周并入库，立即刷新下方对比。月度对比需同月多周；季度/年度对比需各月月度周报。</div>
+          </div>
+        </div>
+        <div class="uc-files" id="cmpFileList"></div>
+        <div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">
+          <label class="btn primary">选择周报文件（可多选）<input type="file" id="cmpFiles" accept=".xlsx,.xls" multiple hidden/></label>
+          <div class="field"><label>默认年</label><input type="number" id="cmpUYr" value="${p.year}" min="2000" max="2100" style="min-width:72px"/></div>
+          <div class="field"><label>默认月</label><input type="number" id="cmpUMo" value="${p.month}" min="1" max="12" style="min-width:64px"/></div>
+          <div class="field"><label>默认周</label><input type="number" id="cmpUWk" value="${p.week}" min="1" max="6" style="min-width:64px"/></div>
+          <button class="btn" id="cmpParse">解析所选</button>
+          <button class="btn primary" id="cmpCommit" disabled>确认入库</button>
+        </div>
+        <div class="uc-log" id="cmpUploadLog">尚未选择文件。选好后点「解析所选」预览，确认无误再入库。</div>
+      </div>`;
+  }
+
+  function parseCmpFile(file, defYr, defMo, defWk) {
+    const name = file.name || '';
+    let year = defYr, month = defMo, week = defWk;
+    const ym = name.match(/(20\d{2})/); if (ym) year = parseInt(ym[1], 10);
+    const mm = name.match(/(\d{1,2})月(?!周)/); if (mm) { const m = parseInt(mm[1], 10); if (m >= 1 && m <= 12) month = m; }
+    const wm = name.match(/第\s*(\d+)\s*周/); if (wm) week = parseInt(wm[1], 10);
+    return PARSER.parseWeekly(file, { year, month, week }).then(res => {
+      let finalWeek = week;
+      if (!wm && res.detected && res.detected.weekSeq != null) finalWeek = res.detected.weekSeq;
+      const fields = Object.keys(res.values).length;
+      return { period: { year, month, week: finalWeek }, values: res.values, unmatched: res.unmatched, detected: res.detected, fields };
+    });
+  }
+
+  function renderCmpParseLog(results) {
+    const ok = results.filter(r => r.ok);
+    const fail = results.filter(r => !r.ok);
+    let html = '解析完成：<b>' + ok.length + '</b> 份可入库，<b>' + fail.length + '</b> 份失败。<br/>';
+    html += '<table><thead><tr><th>文件</th><th>判定周期</th><th class="num">字段</th><th>提示</th></tr></thead><tbody>';
+    results.forEach(r => {
+      if (r.ok) {
+        const p = r.res.period;
+        const tip = [];
+        if (!r.res.values.campus) tip.push('未识别校区');
+        if (r.res.unmatched && r.res.unmatched.length) tip.push('未匹配 ' + r.res.unmatched.length + ' 项');
+        if (r.res.detected && r.res.detected.isMonthEnd) tip.push('<span class="ok">月度周报</span>');
+        html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td><td class="num">' + r.res.fields + '</td><td>' + (tip.join('；') || '<span class="ok">正常</span>') + '</td></tr>';
+      } else {
+        html += '<tr><td>' + r.file.name + '</td><td colspan="3" class="warn">解析失败：' + (r.err || '未知错误') + '</td></tr>';
+      }
+    });
+    html += '</tbody></table>';
+    $('#cmpUploadLog').innerHTML = html;
+  }
+
+  function wireCompareUpload() {
+    const fileInput = $('#cmpFiles');
+    const listEl = $('#cmpFileList');
+    const logEl = $('#cmpUploadLog');
+    const commitBtn = $('#cmpCommit');
+    const parseBtn = $('#cmpParse');
+    let files = [];
+    let pending = [];
+
+    fileInput.addEventListener('change', e => {
+      files = [...(e.target.files || [])];
+      if (!files.length) { listEl.innerHTML = ''; commitBtn.disabled = true; logEl.textContent = '尚未选择文件。'; pending = []; return; }
+      listEl.innerHTML = files.map(f => '<div class="uc-file">📄 ' + f.name + '</div>').join('');
+      commitBtn.disabled = true; pending = [];
+      logEl.textContent = '已选 ' + files.length + ' 份，点「解析所选」预览。';
+    });
+
+    parseBtn.addEventListener('click', () => {
+      if (!files.length) { toast('请先选择文件'); return; }
+      const defYr = parseInt($('#cmpUYr').value, 10);
+      const defMo = parseInt($('#cmpUMo').value, 10);
+      const defWk = parseInt($('#cmpUWk').value, 10);
+      logEl.textContent = '解析中…';
+      Promise.all(files.map(f => parseCmpFile(f, defYr, defMo, defWk)
+        .then(res => ({ file: f, res, ok: true }))
+        .catch(err => ({ file: f, err: err.message, ok: false }))))
+        .then(results => { pending = results; renderCmpParseLog(results); commitBtn.disabled = results.filter(r => r.ok).length === 0; });
+    });
+
+    commitBtn.addEventListener('click', () => {
+      const ok = pending.filter(r => r.ok);
+      if (!ok.length) return;
+      let n = 0;
+      ok.forEach(r => {
+        const p = r.res.period, v = r.res.values;
+        STORE.upsert({ stream: 'weekly', year: p.year, month: p.month, week: p.week, campus: v.campus || '泉山', values: v, importedAt: Date.now() });
+        n++;
+      });
+      toast('已入库 ' + n + ' 份历史周报');
+      updateCount();
+      tabs[currentTab].render();
+    });
+  }
+
   // —— 对比中心 ——
   function renderCompare() {
     const recs = STORE.list('weekly');
@@ -366,7 +471,8 @@
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
     let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">横向对比 = 下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」。</div>';
+    html += '<div class="panel-desc">横向对比 = 下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」。若下方显示「暂无数据」，先用上方面板入库对应周期的周报。</div>';
+    html += compareUploadPanelHTML();
     html += '<div class="row">';
     html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option></select></div>';
     html += '<div class="field"><label>年份</label><select id="cmpYear">' + years.concat([yr]).filter((v, i, a) => a.indexOf(v) === i).map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '</option>').join('') + '</select></div>';
@@ -375,6 +481,7 @@
     html += '</div>';
     html += '<div id="cmpResult"></div></div>';
     $('#content').innerHTML = html;
+    wireCompareUpload();
 
     const typeSel = $('#cmpType'), yrSel = $('#cmpYear'), moSel = $('#cmpMonth'), qSel = $('#cmpQuarter');
     function toggle() {
@@ -556,4 +663,5 @@
   }
 
   document.addEventListener('DOMContentLoaded', init);
+  CA.go = go; // 调试/测试出口，生产环境无副作用
 })(window);
