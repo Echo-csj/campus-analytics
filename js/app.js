@@ -479,7 +479,7 @@
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
     let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」，按各周报「数据统计表」原始事项逐行对齐、差异留空）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用上方「历史周报批量入库」入库对应周期周报。</div>';
+    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」按《季度数据统计标准》列出的月度字段对齐）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用上方「历史周报批量入库」入库对应周期周报。</div>';
     html += compareUploadPanelHTML();
     html += '<div class="row">';
     html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option><option value="qsummary">季度汇总（季度数据汇总）</option></select></div>';
@@ -513,7 +513,7 @@
       let cmp;
       if (type === 'month') cmp = AGG.compareMonthly(recs, y, parseInt(moSel.value, 10));
       else if (type === 'quarter') cmp = AGG.compareQuarter(recs, y, parseInt(qSel.value, 10));
-      else cmp = AGG.compareYear(recs, y);
+      else cmp = AGG.compareYearStandard(recs, y);
       renderCompareTable(cmp);
     }
     draw();
@@ -537,7 +537,7 @@
       html += '</tr>';
     });
     html += '</tbody></table></div>';
-    html += '<div class="preview-note">说明：按各周 / 各月「数据统计表」的<b>原始事项</b>逐行对齐；某列未出现的项留空。要补历史，用上方「历史周报批量入库」。</div>';
+    html += '<div class="preview-note">说明：月度/季度对比按各周报「数据统计表」原始事项对齐；年度对比仅展示《季度数据统计标准》列出的月度字段，并保持与该标准一致的顺序。某列未出现的项留空。</div>';
     // 选指标画柱状（仅含数值的对比项）
     const metricRows = cmp.rows.filter(r => r.values.some(c => c && c.num != null));
     html += '<div class="section-h">柱状对比（选指标）</div><div class="field"><select id="cmpMetric">' +

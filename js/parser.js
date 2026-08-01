@@ -17,8 +17,19 @@
   }
 
   function sheetToMatrix(ws) {
-    const out = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+    // raw:true 读取单元格原始值：百分比格式单元格的 underlying value 即为小数（0.7039），
+    // 避免 formatted value "7039%" 被误判为 7039 再 ÷100 导致扩大 100 倍。
+    const out = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
     return out;
+  }
+
+  // 简易百分数格式化（与 app.js 的 pct 保持一致）
+  function pct(v) {
+    if (v == null) return '';
+    const p = Math.round(v * 10000) / 100;
+    let s = p.toFixed(2);
+    if (s.indexOf('.') >= 0) s = s.replace(/\.?0+$/, '');
+    return s + '%';
   }
 
   // —— 周报解析 ——
@@ -40,26 +51,29 @@
             if (label == null) continue;
             const lab = String(label).trim();
             const rawStr = (val == null ? '' : String(val).trim());
+            // raw:true 下百分比格式单元格已返回小数；保留 isPct 仅用于文本型 "%" 旧数据兼容
             const isPct = /[%％]/.test(rawStr);
             const num = toNum(val);
-            // 对比图表统一用「百分数」坐标：带%号时 num 已是百分数(0.97/98)；
-            // 不带%号的小数(0.8823)实为小数，×100 得百分数(88.23)，与带%号口径对齐。
-            let cellNum = num;
-            if (f && f.type === 'ratio' && f.unit !== '比' && !isPct && typeof num === 'number') cellNum = num * 100;
-            rows.push({ label: lab, raw: rawStr, num: cellNum, isPct: isPct, text: rawStr });
             // 规范字段映射：精确匹配优先，否则大小写不敏感匹配
             let f = CA.SCHEMA.weeklyLabelMap[lab];
             if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
+            // 入库 values：比例类字段统一存为小数(0–1)
+            let storeVal = (f && f.type === 'text') ? (val == null ? '' : String(val)) : num;
+            if (f && f.type === 'ratio' && f.unit !== '比' && (isPct || (typeof storeVal === 'number' && storeVal > 1))) {
+              storeVal = storeVal / 100;
+            }
+            // rows：供对比中心按原表对齐显示用。比率字段统一做标准化显示，避免 7039% 这类异常。
+            let cellNum = num, cellText = rawStr, cellIsPct = isPct;
+            if (f && f.type === 'ratio' && f.unit !== '比') {
+              cellIsPct = true;
+              cellNum = (storeVal != null) ? storeVal * 100 : null;
+              cellText = (storeVal != null) ? pct(storeVal) : rawStr;
+            }
+            rows.push({ label: lab, raw: rawStr, num: cellNum, isPct: cellIsPct, text: cellText });
             if (f) {
-              let n = (f.type === 'text') ? (val == null ? '' : String(val)) : num;
-              // 比例类字段统一存为小数(0–1)：
-              //  · 原表带「%」号 → 必为百分数，直接 ÷100（98%→0.98，0.97%→0.0097）
-              //  · 无「%」号但 >1 → 兼容老数据按百分数处理 ÷100
-              //  · 无「%」号且 ≤1 → 视为已为小数/分数（如 7月周报的 0.8823；单科比经 unit 排除）
-              if (f.type === 'ratio' && f.unit !== '比' && (isPct || (typeof n === 'number' && n > 1))) n = n / 100;
-              values[f.key] = n;
-              if (f.key === 'weekSeq') weekSeq = n;
-              if (f.key === 'totalWeeksOfMonth') totalWeeks = n;
+              values[f.key] = storeVal;
+              if (f.key === 'weekSeq') weekSeq = storeVal;
+              if (f.key === 'totalWeeksOfMonth') totalWeeks = storeVal;
             } else {
               unmatched.push(lab);
             }

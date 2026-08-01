@@ -36,7 +36,27 @@
       result.push(pick);
     });
     result.sort((a, b) => (a.year - b.year) || (a.month - b.month));
-    return result;
+    // 兼容旧数据：比例字段统一归一化为小数
+    return result.map(r => normalizeWeeklyValues(r));
+  }
+
+  // 比例字段防御性归一化：统一存为小数(0–1)。旧数据/异常原表可能把 70.39 当 70.39% 存储。
+  function normalizeRatio(key, val) {
+    if (val == null || typeof val !== 'number' || !isFinite(val)) return val;
+    const f = CA.SCHEMA.weeklyFields.find(x => x.key === key);
+    if (!f || f.type !== 'ratio' || f.unit === '比') return val;
+    return val > 1 ? val / 100 : val;
+  }
+
+  // 清洗单条周报 values 中所有比例字段（用于兼容旧数据）
+  function normalizeWeeklyValues(rec) {
+    if (!rec || !rec.values) return rec;
+    CA.SCHEMA.weeklyFields.forEach(f => {
+      if (f.type === 'ratio' && f.unit !== '比' && rec.values[f.key] != null) {
+        rec.values[f.key] = normalizeRatio(f.key, rec.values[f.key]);
+      }
+    });
+    return rec;
   }
 
   // 取某条周报的「原表事项」行；优先用解析时忠实保留的 rows，
@@ -51,7 +71,7 @@
       let num, text;
       if (isPct) {
         // 归一为小数（兼容旧数据可能直接存了百分数）；text 显示百分数，num 为百分数供图表
-        const pn = (base != null && base > 1) ? base / 100 : base;
+        const pn = normalizeRatio(f.key, base);
         num = (pn != null) ? pn * 100 : null;
         text = (pn != null) ? (pn * 100).toFixed(1) + '%' : (raw == null ? '' : String(raw));
       } else {
@@ -110,6 +130,35 @@
     const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
     const recMap = {}; me.forEach(r => recMap[r.month] = r);
     return buildCompareRaw(columns, recMap);
+  }
+
+  // 年度对比（标准字段模式）：只显示《季度数据统计标准》中列出的月度原数据字段，
+  // 并保持与 QUARTERLY_RULES 一致的顺序，便于与季度汇总口径对齐。
+  function compareYearStandard(weeklyRecs, year) {
+    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
+    const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
+    const recMap = {}; me.forEach(r => recMap[r.month] = r);
+    const rows = QUARTERLY_RULES.map(rule => {
+      const f = CA.SCHEMA.weeklyFields.find(x => x.key === rule.key);
+      const cells = columns.map(c => {
+        const rec = recMap[c.key];
+        if (!rec || rec.values[rule.key] == null) return null;
+        const val = normalizeRatio(rule.key, rec.values[rule.key]);
+        const isRatio = f && f.type === 'ratio';
+        const isBi = f && f.unit === '比';
+        let num, text;
+        if (isRatio) {
+          num = isBi ? val : val * 100;
+          text = isBi ? String(val) : (val * 100).toFixed(1) + '%';
+        } else {
+          num = val;
+          text = String(val);
+        }
+        return { num: num, text: text, isPct: isRatio && !isBi };
+      });
+      return { key: rule.key, label: rule.src, isPct: f && f.type === 'ratio' && f.unit !== '比', values: cells };
+    }).filter(r => r.values.some(c => c != null));
+    return { columns, rows };
   }
 
   // 最佳科组：月度自动汇总（按 年-月-科组）
@@ -282,7 +331,7 @@
         const pop = r.values.campusTotal;
         return (pop != null && pop !== 0) ? cash / pop : null;
       }
-      return r.values[key];
+      return normalizeRatio(key, r.values[key]);
     }).filter(v => v != null && isFinite(v));
     return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
   }
@@ -341,9 +390,9 @@
   }
 
   CA.aggregate = {
-    withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear, recToRows, buildCompareRaw,
+    withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear, compareYearStandard, recToRows, buildCompareRaw,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
-    QUARTERLY_RULES, quarterlyAggregate, quarterOptions, evalExpr,
+    QUARTERLY_RULES, quarterlyAggregate, quarterOptions, evalExpr, normalizeRatio,
   };
 
 })(window);
