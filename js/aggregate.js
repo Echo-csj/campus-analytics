@@ -39,16 +39,45 @@
     return result;
   }
 
-  // 横向对比表构造器
-  function buildCompare(columns, records, fieldList) {
-    const rows = fieldList.map(f => {
-      const vals = columns.map(c => {
-        const rec = records[c.key];
-        return rec ? rec.values[f.key] : null;
-      });
-      return { key: f.key, label: f.label, group: f.group, unit: f.unit, type: f.type, values: vals };
+  // 取某条周报的「原表事项」行；优先用解析时忠实保留的 rows，
+  // 旧记录/示例数据无 rows 时，按 weeklyFields 从 values 回退合成（保证可对比）。
+  function recToRows(rec) {
+    if (rec.rows && rec.rows.length) return rec.rows;
+    const v = rec.values || {};
+    return CA.SCHEMA.weeklyFields.filter(f => v[f.key] != null).map(f => {
+      const isPct = f.type === 'ratio';
+      const raw = v[f.key];
+      let num = (typeof raw === 'number') ? raw : CA.parser.toNum(raw);
+      let text = (typeof raw === 'number') ? String(raw) : String(raw);
+      if (isPct && typeof raw === 'number') { num = raw * 100; text = (raw * 100).toFixed(1) + '%'; }
+      else if (isPct && typeof raw === 'string') { text = (CA.parser.toNum(raw) * 100).toFixed(1) + '%'; }
+      return { label: f.label, raw: text, num: num, isPct: isPct, text: text };
     });
-    return { columns, rows };
+  }
+
+  // 横向对比表构造器（忠实原表）：按列顺序取并集标签，逐行对齐；
+  // 某列未出现的项 → 该单元格留空（null），渲染时显示空白。
+  function buildCompareRaw(columns, recMap) {
+    const seen = new Set();
+    const order = [];
+    columns.forEach(c => {
+      const rec = recMap[c.key];
+      const rows = rec ? recToRows(rec) : [];
+      rows.forEach(r => {
+        const lab = String(r.label).trim();
+        if (lab && !seen.has(lab)) { seen.add(lab); order.push(lab); }
+      });
+    });
+    const table = order.map(lab => {
+      const cells = columns.map(c => {
+        const rec = recMap[c.key];
+        if (!rec) return null;
+        const hit = recToRows(rec).find(r => String(r.label).trim() === lab);
+        return hit ? { num: hit.num, text: hit.text, isPct: !!hit.isPct } : null;
+      });
+      return { key: lab, label: lab, isPct: cells.some(c => c && c.isPct), values: cells };
+    });
+    return { columns, rows: table };
   }
 
   // 月度对比：某年某月各周横向
@@ -57,7 +86,7 @@
       .sort((a, b) => a.week - b.week);
     const columns = recs.map(r => ({ key: r.week, label: '第' + r.week + '周' }));
     const recMap = {}; recs.forEach(r => recMap[r.week] = r);
-    return buildCompare(columns, recMap, CA.SCHEMA.weeklyFields.filter(f => f.group !== '基础信息' || ['totalWeeksOfMonth', 'weekSeq'].includes(f.key)));
+    return buildCompareRaw(columns, recMap);
   }
 
   // 季度对比：某年某季各月月度周报横向
@@ -66,7 +95,7 @@
     const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year && months.includes(r.month));
     const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
     const recMap = {}; me.forEach(r => recMap[r.month] = r);
-    return buildCompare(columns, recMap, CA.SCHEMA.weeklyFields.filter(f => f.group !== '基础信息'));
+    return buildCompareRaw(columns, recMap);
   }
 
   // 年度对比：某年各月月度周报横向
@@ -74,7 +103,7 @@
     const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
     const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
     const recMap = {}; me.forEach(r => recMap[r.month] = r);
-    return buildCompare(columns, recMap, CA.SCHEMA.weeklyFields.filter(f => f.group !== '基础信息'));
+    return buildCompareRaw(columns, recMap);
   }
 
   // 最佳科组：月度自动汇总（按 年-月-科组）
@@ -167,7 +196,7 @@
   }
 
   CA.aggregate = {
-    withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear,
+    withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear, recToRows, buildCompareRaw,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
   };
 

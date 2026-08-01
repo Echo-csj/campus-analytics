@@ -159,8 +159,12 @@
   const weeklyLabelMap = {};
   weeklyFields.forEach(f => { weeklyLabelMap[f.label] = f; });
 
+  // 大小写不敏感反查表（解决 1v1 / 1V1 等写法差异导致的解析丢失）
+  const weeklyLabelMapCI = {};
+  weeklyFields.forEach(f => { weeklyLabelMapCI[f.label.toLowerCase()] = f; });
+
   CA.SCHEMA = {
-    weeklyFields, weeklyGroups, weeklyLabelMap, satisfactionItems,
+    weeklyFields, weeklyGroups, weeklyLabelMap, weeklyLabelMapCI, satisfactionItems,
     kezuFields, kpiFields,
     streams: ['weekly', 'kezu', 'kpi'],
   };

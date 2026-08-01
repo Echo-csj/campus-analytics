@@ -27,6 +27,7 @@
     return String(v);
   }
   function pct(v) { return v == null ? '—' : (v * 100).toFixed(1) + '%'; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function parseFileWeek(name) {
     const m = String(name).match(/第\s*(\d+)\s*周/);
     return m ? parseInt(m[1], 10) : 4;
@@ -132,7 +133,7 @@
     html += '<div class="row" style="margin-top:14px"><button class="btn primary" id="confirm_' + stream + '">确认入库</button><button class="btn ghost" id="cancel_' + stream + '">取消</button></div>';
     $('#preview_' + stream).innerHTML = html;
     $('#confirm_' + stream).addEventListener('click', () => {
-      STORE.upsert({ stream: 'weekly', year: pending.ctx.year, month: pending.ctx.month, week: pending.ctx.week, campus: v.campus || '泉山', values: v, importedAt: Date.now() });
+      STORE.upsert({ stream: 'weekly', year: pending.ctx.year, month: pending.ctx.month, week: pending.ctx.week, campus: v.campus || '泉山', values: v, rows: res.rows, importedAt: Date.now() });
       toast('周报已入库'); pending = null; renderWeekly();
     });
     $('#cancel_' + stream).addEventListener('click', () => { $('#preview_' + stream).innerHTML = ''; pending = null; });
@@ -395,7 +396,7 @@
       let finalWeek = week;
       if (!wm && res.detected && res.detected.weekSeq != null) finalWeek = res.detected.weekSeq;
       const fields = Object.keys(res.values).length;
-      return { period: { year, month, week: finalWeek }, values: res.values, unmatched: res.unmatched, detected: res.detected, fields };
+      return { period: { year, month, week: finalWeek }, values: res.values, rows: res.rows, unmatched: res.unmatched, detected: res.detected, fields };
     });
   }
 
@@ -403,7 +404,7 @@
     const ok = results.filter(r => r.ok);
     const fail = results.filter(r => !r.ok);
     let html = '解析完成：<b>' + ok.length + '</b> 份可入库，<b>' + fail.length + '</b> 份失败。<br/>';
-    html += '<table><thead><tr><th>文件</th><th>判定周期</th><th class="num">字段</th><th>提示</th></tr></thead><tbody>';
+    html += '<table><thead><tr><th>文件</th><th>判定周期</th><th class="num">原表事项</th><th>提示</th></tr></thead><tbody>';
     results.forEach(r => {
       if (r.ok) {
         const p = r.res.period;
@@ -411,7 +412,7 @@
         if (!r.res.values.campus) tip.push('未识别校区');
         if (r.res.unmatched && r.res.unmatched.length) tip.push('未匹配 ' + r.res.unmatched.length + ' 项');
         if (r.res.detected && r.res.detected.isMonthEnd) tip.push('<span class="ok">月度周报</span>');
-        html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td><td class="num">' + r.res.fields + '</td><td>' + (tip.join('；') || '<span class="ok">正常</span>') + '</td></tr>';
+        html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td><td class="num">' + (r.res.rows ? r.res.rows.length : r.res.fields) + '</td><td>' + (tip.join('；') || '<span class="ok">正常</span>') + '</td></tr>';
       } else {
         html += '<tr><td>' + r.file.name + '</td><td colspan="3" class="warn">解析失败：' + (r.err || '未知错误') + '</td></tr>';
       }
@@ -455,7 +456,7 @@
       let n = 0;
       ok.forEach(r => {
         const p = r.res.period, v = r.res.values;
-        STORE.upsert({ stream: 'weekly', year: p.year, month: p.month, week: p.week, campus: v.campus || '泉山', values: v, importedAt: Date.now() });
+        STORE.upsert({ stream: 'weekly', year: p.year, month: p.month, week: p.week, campus: v.campus || '泉山', values: v, rows: r.res.rows, importedAt: Date.now() });
         n++;
       });
       toast('已入库 ' + n + ' 份历史周报');
@@ -471,7 +472,7 @@
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
     let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">横向对比 = 下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」。若下方显示「暂无数据」，先用上方面板入库对应周期的周报。</div>';
+    html += '<div class="panel-desc">横向对比 = 下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」。对比<b>直接按各周报「数据统计表」的原始事项逐行对齐</b>，事项不一致时多出来的项留空。若下方显示「暂无数据」，先用上方面板入库对应周期的周报。</div>';
     html += compareUploadPanelHTML();
     html += '<div class="row">';
     html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option></select></div>';
@@ -503,21 +504,29 @@
     draw();
   }
 
+  // 单元格显示：缺失（null）留空；百分比保留原表「%」文本；数值千分位
+  function cellText(cell) {
+    if (!cell) return '';
+    if (cell.num != null) return cell.isPct ? cell.text : fmt(cell.num);
+    return cell.text || '';
+  }
+
   function renderCompareTable(cmp) {
     if (!cmp.columns.length) { $('#cmpResult').innerHTML = '<div class="empty">该范围暂无数据。</div>'; destroyChart('cmpChart'); return; }
-    let html = '<div class="table-wrap"><table><thead><tr><th>指标</th>';
+    let html = '<div class="table-wrap"><table><thead><tr><th>表格事项（原表）</th>';
     cmp.columns.forEach(c => html += '<th class="num">' + c.label + '</th>');
     html += '</tr></thead><tbody>';
     cmp.rows.forEach(r => {
-      html += '<tr><td>' + r.label + '</td>';
-      r.values.forEach(val => html += '<td class="num">' + (r.type === 'ratio' ? pct(val) : fmt(val)) + '</td>');
+      html += '<tr><td>' + esc(r.label) + '</td>';
+      r.values.forEach(cell => html += '<td class="num">' + cellText(cell) + '</td>');
       html += '</tr>';
     });
     html += '</tbody></table></div>';
-    // 选指标画柱状
-    const metricKeys = cmp.rows.filter(r => r.type === 'num' || r.type === 'ratio').map(r => r.key);
+    html += '<div class="preview-note">说明：按各周 / 各月「数据统计表」的<b>原始事项</b>逐行对齐；某列未出现的项留空。要补历史，用上方「历史周报批量入库」。</div>';
+    // 选指标画柱状（仅含数值的对比项）
+    const metricRows = cmp.rows.filter(r => r.values.some(c => c && c.num != null));
     html += '<div class="section-h">柱状对比（选指标）</div><div class="field"><select id="cmpMetric">' +
-      cmp.rows.map(r => '<option value="' + r.key + '">' + r.label + '</option>').join('') + '</select></div>';
+      metricRows.map(r => '<option value="' + esc(r.key) + '">' + r.label + '</option>').join('') + '</select></div>';
     html += '<div class="chart-box"><canvas id="cmpChart"></canvas></div>';
     $('#cmpResult').innerHTML = html;
     const sel = $('#cmpMetric');
@@ -525,7 +534,8 @@
       const row = cmp.rows.find(r => r.key === sel.value);
       destroyChart('cmpChart');
       if (!row) return;
-      drawBar('cmpChart', cmp.columns.map(c => c.label), row.values.map(v => v == null ? null : (row.type === 'ratio' ? +(v * 100).toFixed(2) : v)), row.label, 'rgba(79,70,229,.8)');
+      const data = row.values.map(c => (c && c.num != null) ? c.num : null);
+      drawBar('cmpChart', cmp.columns.map(c => c.label), data, row.label, 'rgba(79,70,229,.8)');
     }
     sel.addEventListener('change', drawChart);
     drawChart();

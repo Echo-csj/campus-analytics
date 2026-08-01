@@ -32,23 +32,31 @@
           const matrix = sheetToMatrix(ws);
           const values = {};
           let unmatched = [];
+          let rows = [];   // 忠实保留原表每一行的「事项→值」，供对比中心按原表对齐
           let weekSeq = null, totalWeeks = null;
           for (const row of matrix) {
             const label = row[0];
             const val = row[1];
             if (label == null) continue;
-            const f = CA.SCHEMA.weeklyLabelMap[String(label).trim()];
+            const lab = String(label).trim();
+            const rawStr = (val == null ? '' : String(val).trim());
+            const isPct = /[%％]/.test(rawStr);
+            const num = toNum(val);
+            rows.push({ label: lab, raw: rawStr, num: num, isPct: isPct, text: rawStr });
+            // 规范字段映射：精确匹配优先，否则大小写不敏感匹配
+            let f = CA.SCHEMA.weeklyLabelMap[lab];
+            if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
             if (f) {
-              const n = (f.type === 'text') ? (val == null ? '' : String(val)) : toNum(val);
+              const n = (f.type === 'text') ? (val == null ? '' : String(val)) : num;
               values[f.key] = n;
               if (f.key === 'weekSeq') weekSeq = n;
               if (f.key === 'totalWeeksOfMonth') totalWeeks = n;
             } else {
-              unmatched.push(String(label));
+              unmatched.push(lab);
             }
           }
           const isMonthEnd = (weekSeq != null && totalWeeks != null) ? (weekSeq === totalWeeks) : false;
-          resolve({ values, unmatched, detected: { weekSeq, totalWeeks, isMonthEnd } });
+          resolve({ values, unmatched, rows, detected: { weekSeq, totalWeeks, isMonthEnd } });
         } catch (err) { reject(err); }
       };
       reader.readAsArrayBuffer(file);
