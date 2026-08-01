@@ -47,10 +47,16 @@
     return CA.SCHEMA.weeklyFields.filter(f => v[f.key] != null).map(f => {
       const isPct = f.type === 'ratio';
       const raw = v[f.key];
-      let num = (typeof raw === 'number') ? raw : CA.parser.toNum(raw);
-      let text = (typeof raw === 'number') ? String(raw) : String(raw);
-      if (isPct && typeof raw === 'number') { num = raw * 100; text = (raw * 100).toFixed(1) + '%'; }
-      else if (isPct && typeof raw === 'string') { text = (CA.parser.toNum(raw) * 100).toFixed(1) + '%'; }
+      const base = (typeof raw === 'number') ? raw : CA.parser.toNum(raw);
+      let num, text;
+      if (isPct) {
+        // 归一为小数（兼容旧数据可能直接存了百分数）；text 显示百分数，num 为百分数供图表
+        const pn = (base != null && base > 1) ? base / 100 : base;
+        num = (pn != null) ? pn * 100 : null;
+        text = (pn != null) ? (pn * 100).toFixed(1) + '%' : (raw == null ? '' : String(raw));
+      } else {
+        num = base; text = (raw == null ? '' : String(raw));
+      }
       return { label: f.label, raw: text, num: num, isPct: isPct, text: text };
     });
   }

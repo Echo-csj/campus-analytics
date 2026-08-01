@@ -47,7 +47,10 @@
             let f = CA.SCHEMA.weeklyLabelMap[lab];
             if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
             if (f) {
-              const n = (f.type === 'text') ? (val == null ? '' : String(val)) : num;
+              let n = (f.type === 'text') ? (val == null ? '' : String(val)) : num;
+              // 比例类字段：仅「率/占比」等百分数口径（unit ≠ '比'）在 >1 时按百分数归一为小数（98%→0.98）；
+              // 「比」类（如单科比 1.8）保持原值，避免误除。
+              if (f.type === 'ratio' && f.unit !== '比' && typeof n === 'number' && n > 1) n = n / 100;
               values[f.key] = n;
               if (f.key === 'weekSeq') weekSeq = n;
               if (f.key === 'totalWeeksOfMonth') totalWeeks = n;
@@ -90,13 +93,17 @@
             const dim = row[headers.indexOf(mapping.dimensionHeader)];
             if (dim == null || String(dim).trim() === '') continue;
             const vals = {};
+            const fieldDef = (k) => CA.SCHEMA.kezuFields.find(f => f.key === k) || CA.SCHEMA.kpiFields.find(f => f.key === k);
             headers.forEach((h, ci) => {
               const key = map[h];
               if (key) {
                 if (key === 'dimension') return;
                 const raw = row[ci];
-                vals[key] = (CA.SCHEMA.kezuFields.find(f => f.key === key) || CA.SCHEMA.kpiFields.find(f => f.key === key));
-                vals[key] = (raw == null ? null : (typeof raw === 'number' ? raw : (key === 'subjectGroup' ? String(raw) : toNum(raw))));
+                let v = (raw == null ? null : (typeof raw === 'number' ? raw : (key === 'subjectGroup' ? String(raw) : toNum(raw))));
+                const fdef = fieldDef(key);
+                // 比例类字段：仅百分数口径（unit ≠ '比'）在 >1 时归一为小数；「比」类保持原值
+                if (fdef && fdef.type === 'ratio' && fdef.unit !== '比' && typeof v === 'number' && v > 1) v = v / 100;
+                vals[key] = v;
               } else if (h) {
                 if (!unmatchedCols.includes(h)) unmatchedCols.push(h);
               }
