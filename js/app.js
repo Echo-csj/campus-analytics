@@ -396,14 +396,15 @@
   function parseCmpFile(file, defYr, defMo, defWk) {
     const name = file.name || '';
     let year = defYr, month = defMo, week = defWk;
-    const ym = name.match(/(20\d{2})/); if (ym) year = parseInt(ym[1], 10);
-    const mm = name.match(/(\d{1,2})月(?!周)/); if (mm) { const m = parseInt(mm[1], 10); if (m >= 1 && m <= 12) month = m; }
+    let yearFromName = false, monthFromName = false;
+    const ym = name.match(/(20\d{2})/); if (ym) { year = parseInt(ym[1], 10); yearFromName = true; }
+    const mm = name.match(/(\d{1,2})\s*月/); if (mm) { const m = parseInt(mm[1], 10); if (m >= 1 && m <= 12) { month = m; monthFromName = true; } }
     const wm = name.match(/第\s*(\d+)\s*周/); if (wm) week = parseInt(wm[1], 10);
     return PARSER.parseWeekly(file, { year, month, week }).then(res => {
       let finalWeek = week;
       if (!wm && res.detected && res.detected.weekSeq != null) finalWeek = res.detected.weekSeq;
       const fields = Object.keys(res.values).length;
-      return { period: { year, month, week: finalWeek }, values: res.values, rows: res.rows, unmatched: res.unmatched, detected: res.detected, fields };
+      return { period: { year, month, week: finalWeek }, values: res.values, rows: res.rows, unmatched: res.unmatched, detected: res.detected, fields, yearFromName, monthFromName };
     });
   }
 
@@ -418,6 +419,7 @@
         const tip = [];
         if (!r.res.values.campus) tip.push('未识别校区');
         if (r.res.unmatched && r.res.unmatched.length) tip.push('未匹配 ' + r.res.unmatched.length + ' 项');
+        if (!r.res.monthFromName) tip.push('<span class="warn">文件名未识别月份，已用默认月，请核对</span>');
         if (r.res.detected && r.res.detected.isMonthEnd) tip.push('<span class="ok">月度周报</span>');
         html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td><td class="num">' + (r.res.rows ? r.res.rows.length : r.res.fields) + '</td><td>' + (tip.join('；') || '<span class="ok">正常</span>') + '</td></tr>';
       } else {
