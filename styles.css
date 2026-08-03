@@ -245,3 +245,45 @@ td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numer
 }
 .empty .empty-cta { margin-top: 12px; }
 .rec-detail { padding: 10px 14px 14px; background: var(--bg-subtle); border-bottom: 1px solid var(--border); }
+
+/* —— 核心数据看板 —— */
+/* 子标签切换 */
+.dash-tabs { display: flex; gap: 4px; margin-bottom: 18px; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.dash-tab {
+  border: none; background: transparent; cursor: pointer; padding: 8px 16px;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0; color: var(--text-2);
+  font-size: 13.5px; font-weight: 500; font-family: inherit; transition: all .15s ease;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.dash-tab:hover { color: var(--text); background: var(--bg-subtle); }
+.dash-tab.active { color: var(--indigo); font-weight: 600; border-bottom-color: var(--indigo); }
+
+/* 仪表盘卡片 */
+.gauge-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
+.gauges-4 { grid-template-columns: repeat(4, 1fr); }
+@media (max-width: 880px) { .gauge-grid { grid-template-columns: 1fr 1fr; } }
+
+.gauge-card {
+  border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; background: var(--bg);
+  display: flex; align-items: center; gap: 14px; box-shadow: var(--shadow); transition: all .2s ease;
+}
+.gauge-card:hover { box-shadow: var(--shadow-hover); transform: translateY(-1px); }
+
+/* 进度环 */
+.gauge-ring { width: 50px; height: 50px; flex-shrink: 0; position: relative; }
+.gauge-ring svg { width: 100%; height: 100%; }
+.gauge-ring::after {
+  content: attr(data-pct); display: none;
+}
+
+/* 卡片内容 */
+.gc-body { min-width: 0; flex: 1; }
+.gc-k { font-size: 12px; color: var(--text-2); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gc-v { margin-top: 6px; display: flex; align-items: baseline; gap: 4px; }
+.gv-num { font-size: 24px; font-weight: 600; font-family: var(--mono); letter-spacing: -.02em; color: var(--text); }
+.gv-unit { font-size: 13px; color: var(--text-3); font-weight: 400; }
+.gv-empty { font-size: 24px; color: var(--text-3); font-family: var(--mono); }
+
+/* 季度区块 */
+.qtr-block { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; background: var(--bg-subtle); }
+.qtr-head { font-weight: 600; font-size: 14px; margin-bottom: 12px; color: var(--text); display: flex; align-items: center; gap: 8px; }

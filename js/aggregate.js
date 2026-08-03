@@ -389,10 +389,100 @@
     return [...set].sort().reverse().map(s => { const [y, q] = s.split('-'); return { year: +y, quarter: +q }; });
   }
 
+  // —— 年度汇总（依据《年度数据统计标准·数据统计表》）——
+  // 规则与季度标准一致，仅 label 前缀改为「年度」、ruleText 改为「当年」口径。
+  //   last = 当年最后一个月的数据
+  //   sum  = 当年各月之和
+  //   avg  = 当年各月的平均值（月人均效能值 = 各月(月课时生产总现金/校区总人数) 之平均）
+  //   derived = 生产完成率/课时生产总现金/金额占比/离职人数率 四项按原表公式
+  const YEARLY_RULES = [
+    { key: 'teacherCount', label: '教师数', src: '教师数', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'campusTotal', label: '校区总人数', src: '校区总人数', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v1Students', label: '1v1在读学员', src: '1v1在读学员', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v1Subjects', label: '1v1在读单科', src: '1v1在读单科', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'subjectRatio', label: '单科比', src: '单科比', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v6Students', label: '1v6在读学员数', src: '1v6在读学员数', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v6Subjects', label: '1v6在读学单科', src: '1v6在读学单科', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v6SubjectRatio', label: '1v6单科比', src: '1v6单科比', rule: 'last', ruleText: '当年最后一个月的数据' },
+    { key: 'v1MonthTarget', label: '1V1年度目标课时', src: '1V1月目标课时', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'v1MonthProduced', label: '1v1年度生产课时', src: '1v1月生产课时', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'v6MonthProduced', label: '1v6年度生产课时', src: '1v6月生产课时', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'v1MonthRate', label: '1V1年度生产完成率', src: '1V1月生产完成率', rule: 'derived', expr: 'v1MonthProduced / v1MonthTarget', ruleText: '年度生产课时总和 / 年度目标课时总和' },
+    { key: 'v1MonthCash', label: '1v1年度课时生产现金', src: '1v1月课时生产现金', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'v1MonthCashAvg', label: '1v1年度课时生产现金均价', src: '1v1月课时生产现金均价', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'v6MonthCash', label: '1v6年度课时生产现金', src: '1v6月课时生产现金', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'monthCashTotal', label: '年度课时生产总现金', src: '月课时生产总现金', rule: 'derived', expr: 'v1MonthCash + v6MonthCash', ruleText: '1v1年度课时生产现金 + 1v6年度课时生产现金' },
+    { key: 'v1MonthCashRatio', label: '1v1年度课时生产金额占比', src: '1v1月课时生产金额占比', rule: 'derived', expr: 'v1MonthCash / monthCashTotal', ruleText: '1v1年度课时生产现金 / 年度课时生产总现金' },
+    { key: 'monthEff', label: '年度人均效能值', src: '月人均效能值', rule: 'avg', ruleText: '当年各月的平均值（各月 月课时生产总现金/校区总人数 之平均）' },
+    { key: 'v1MonthUnitAvg', label: '1v1年度单位周平均', src: '1v1月单位周平均', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'monthSaturation', label: '年度饱和度', src: '月饱和度', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'xfMonthNum', label: '1V1年度续费人数', src: '1V1月续费人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'xfMonthNumRate', label: '1V1年度续费人数率', src: '1V1月续费人数率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'xfMonthSubj', label: '1V1年度续费单科', src: '1V1月续费单科', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'xfMonthSubjRate', label: '1V1年度续费单科率', src: '1V1月续费单科率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tjMonthNum', label: '1V1年度推荐人数', src: '1V1月推荐人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'tjMonthNumRate', label: '1V1年度推荐人数率', src: '1V1月推荐人数率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tjMonthSubj', label: '1V1年度推荐单科', src: '1V1月推荐单科', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'tjMonthSubjRate', label: '1V1年度推荐单科率', src: '1V1月推荐单科率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'jkMonthSubj', label: '1V1年度结课单科', src: '1V1月结课单科', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'jkMonthSubjRate', label: '1V1年度结课单科率', src: '1V1月结课单科率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'jkMonthNum', label: '1V1年度结课人数', src: '1V1月结课人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'jkMonthNumRate', label: '1V1年度结课人数率', src: '1V1月结课人数率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tfMonthSubj', label: '1V1年度退费单科', src: '1V1月退费单科', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'tfMonthSubjRate', label: '1V1年度退费单科率', src: '1V1月退费单科率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tfMonthNum', label: '1V1年度退费人数', src: '1V1月退费人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'tfMonthNumRate', label: '1V1年度退费人数率', src: '1V1月退费人数率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tkNum', label: '1V1年度停课人数', src: '1V1停课人数', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'tkNumRate', label: '1V1年度停课人数率', src: '1V1停课人数率', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'entryMonth', label: '年度入职人数', src: '月入职人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'quitMonth', label: '年度离职人数', src: '月离职人数', rule: 'sum', ruleText: '当年各月之和' },
+    { key: 'quitMonthRate', label: '年度离职人数率', src: '月离职人数率', rule: 'derived', expr: 'quitMonth / (teacherCount + quitMonth)', ruleText: '年度离职人数 / (教师数 + 年度离职人数)' },
+    { key: 'coreTeacherCount', label: '年度骨干教师人数', src: '骨干教师人数', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'coreTeacherRatio', label: '年度骨干教师占比', src: '骨干教师占比', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'doubleThreeCount', label: '年度双三老师人数', src: '双三老师人数', rule: 'avg', ruleText: '当年各月的平均值' },
+    { key: 'doubleThreeRatio', label: '年度双三老师占比', src: '双三老师占比', rule: 'avg', ruleText: '当年各月的平均值' },
+  ];
+
+  // 年度汇总：按年聚合所有月度周报
+  function yearlyAggregate(weeklyRecs, year) {
+    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
+    if (!me.length) return null;
+    me.sort((a, b) => a.month - b.month);
+    const months = me;
+    const yv = {};
+    // 第一遍：标量聚合
+    YEARLY_RULES.forEach(rule => {
+      if (rule.rule === 'last') {
+        const last = [...months].reverse().find(r => r.values[rule.key] != null);
+        yv[rule.key] = last ? last.values[rule.key] : null;
+      } else if (rule.rule === 'sum') {
+        const vals = months.map(r => r.values[rule.key]).filter(v => v != null && isFinite(v));
+        yv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      } else if (rule.rule === 'avg') {
+        yv[rule.key] = avgMonthly(months, rule.key);
+      }
+    });
+    // 第二遍：派生字段
+    let changed = true, guard = 0;
+    while (changed && guard < 12) {
+      changed = false; guard++;
+      YEARLY_RULES.forEach(rule => {
+        if (rule.rule === 'derived' && yv[rule.key] == null) {
+          const v = evalExpr(rule.expr, yv);
+          if (v != null) { yv[rule.key] = v; changed = true; }
+        }
+      });
+    }
+    const expected = Array.from({ length: 12 }, (_, i) => i + 1);
+    const missingMonths = expected.filter(m => !months.some(r => r.month === m));
+    return { year, values: yv, months, sourceMonths: months.map(r => r.month), missingMonths };
+  }
+
   CA.aggregate = {
     withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear, compareYearStandard, recToRows, buildCompareRaw,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate, quarterOptions, evalExpr, normalizeRatio,
+    YEARLY_RULES, yearlyAggregate,
   };
 
 })(window);

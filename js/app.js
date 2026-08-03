@@ -614,6 +614,173 @@
     toast('已导出 ' + year + 'Q' + quarter + ' 季度汇总');
   }
 
+  // —— 核心数据看板 ——
+  // 仪表盘式卡片：大号数值 + 进度环 + 单位标签
+  function gaugeCard(label, value, unit, pctVal, color) {
+    const v = value == null ? '<span class="gv-empty">—</span>' : '<span class="gv-num">' + value + '</span>';
+    const u = unit ? '<span class="gv-unit">' + unit + '</span>' : '';
+    const ring = pctVal != null && pctVal >= 0
+      ? '<div class="gauge-ring" style="--p:' + Math.min(pctVal, 100) + ';--c:' + (color || 'var(--indigo)') + '">' +
+        '<svg viewBox="0 0 44 44"><circle cx="22" cy="22" r="18" fill="none" stroke="var(--border)" stroke-width="4"/>' +
+        '<circle cx="22" cy="22" r="18" fill="none" stroke="' + (color || 'var(--indigo)') + '" stroke-width="4" ' +
+        'stroke-linecap="round" stroke-dasharray="' + (Math.min(pctVal, 100) * 1.13) + ' 113.1" ' +
+        'transform="rotate(-90 22 22)"/></svg></div>'
+      : '';
+    return '<div class="gauge-card">' + ring + '<div class="gc-body"><div class="gc-k">' + label + '</div><div class="gc-v">' + v + u + '</div></div></div>';
+  }
+
+  function renderDashboard() {
+    let html = '<div class="panel"><div class="panel-title">核心数据看板</div>';
+    html += '<div class="panel-desc">基于《年度数据统计标准》和《季度数据统计标准》汇总，以仪表盘形式直观呈现年度核心指标和各季度对比趋势。数据源为各月「月度周报」。</div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button></div>';
+    html += '<div id="dashBody"></div></div>';
+    $('#content').innerHTML = html;
+    $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
+      $all('.dash-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      if (b.dataset.sub === 'year') renderYearDashboard();
+      else renderQuarterDashboard();
+    }));
+    renderYearDashboard();
+  }
+
+  function renderYearDashboard() {
+    const recs = STORE.list('weekly');
+    const years = AGG.yearOptions(recs);
+    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「对比中心」入库各月月度周报。</div>'; return; }
+    const yr = Math.max(...years);
+    let html = '<div class="row" style="margin-bottom:16px"><div class="field"><label>年份</label><select id="dashYr">' +
+      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div></div>';
+    html += '<div id="ydashResult"></div>';
+    $('#dashBody').innerHTML = html;
+    $('#dashYr').addEventListener('change', () => drawYearDash());
+    drawYearDash();
+
+    function drawYearDash() {
+      const y = parseInt($('#dashYr').value, 10);
+      const yd = AGG.yearlyAggregate(recs, y);
+      if (!yd) { $('#ydashResult').innerHTML = '<div class="empty">' + y + '年暂无月度周报数据。</div>'; return; }
+      const v = yd.values;
+      // 核心指标仪表盘卡片
+      const gauges = [
+        gaugeCard('年度课时生产总现金', fmt(v.monthCashTotal), '元', null, null),
+        gaugeCard('年度生产完成率', pct(v.v1MonthRate), '', v.v1MonthRate != null ? v.v1MonthRate * 100 : null, 'var(--indigo)'),
+        gaugeCard('年度1V1生产课时', fmt(v.v1MonthProduced), '课时', null, null),
+        gaugeCard('年度1V6生产课时', fmt(v.v6MonthProduced), '课时', null, null),
+        gaugeCard('年度人均效能值', fmt(v.monthEff, 0), '', null, null),
+        gaugeCard('年度饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--green)'),
+        gaugeCard('年度续费人数', fmt(v.xfMonthNum), '人', null, null),
+        gaugeCard('年度骨干教师占比', pct(v.coreTeacherRatio), '', v.coreTeacherRatio != null ? v.coreTeacherRatio * 100 : null, 'var(--amber)'),
+      ];
+      let h = '<div class="gauge-grid">' + gauges.join('') + '</div>';
+      // 缺失月份提示
+      let note = '数据来源：' + y + '年 ' + (yd.sourceMonths.length ? yd.sourceMonths.map(m => m + '月').join('、') : '无') + ' 月度周报。';
+      if (yd.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + yd.missingMonths.map(m => m + '月').join('、') + '，结果可能不完整。</span>';
+      h += '<div class="preview-note">' + note + '</div>';
+      // 对比图表：各月趋势（课时生产现金 + 完成率双轴）
+      const me = AGG.monthEndWeeklies(recs).filter(r => r.year === y).sort((a, b) => a.month - b.month);
+      h += '<div class="section-h">年度月度趋势</div><div class="chart-box"><canvas id="yrTrendChart"></canvas></div>';
+      // 完整数据表
+      h += '<div class="section-h">完整年度数据</div><div class="table-wrap"><table><thead><tr><th>年度数据（名称）</th><th class="num">年度数据值</th><th>年度数据填写标准</th></tr></thead><tbody>';
+      AGG.YEARLY_RULES.forEach(r => {
+        h += '<tr><td><div class="q-name">' + esc(r.label) + '</div><div class="q-src">月度原数据：' + esc(r.src) + '</div></td><td class="num">' + fmtQ(r.key, v[r.key]) + '</td>' +
+          '<td style="color:#71717a;font-size:12.5px">' + esc(r.ruleText) + '</td></tr>';
+      });
+      h += '</tbody></table></div>';
+      h += '<div class="preview-note">说明：率/均价/停课/骨干/双三/人均效能值等为<b>全年各月平均</b>；仅生产完成率、课时生产总现金、金额占比、离职人数率四项按原表公式计算。</div>';
+      $('#ydashResult').innerHTML = h;
+      // 月度趋势图
+      destroyChart('yrTrendChart');
+      const ctx = $('#yrTrendChart'); if (ctx) {
+        const labels = me.map(r => r.month + '月');
+        const cashData = me.map(r => { const c = (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0); return c || null; });
+        const rateData = me.map(r => r.values.v1MonthRate != null ? r.values.v1MonthRate * 100 : null);
+        charts['yrTrendChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets: [
+            { label: '月课时生产现金', data: cashData, backgroundColor: 'rgba(79,70,229,.7)', borderRadius: 4, yAxisID: 'y' },
+            { label: '1V1生产完成率', data: rateData, type: 'line', borderColor: 'rgba(22,163,74,.9)', backgroundColor: 'rgba(22,163,74,.1)', borderWidth: 2, pointRadius: 4, yAxisID: 'y1', tension: .3 },
+          ] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
+            scales: { y: { beginAtZero: true, title: { display: true, text: '现金(元)' } }, y1: { position: 'right', beginAtZero: true, max: 120, title: { display: true, text: '完成率(%)' }, grid: { drawOnChartArea: false } } } },
+        });
+      }
+    }
+  }
+
+  function renderQuarterDashboard() {
+    const recs = STORE.list('weekly');
+    const years = AGG.yearOptions(recs);
+    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「对比中心」入库各月月度周报。</div>'; return; }
+    const yr = Math.max(...years);
+    let html = '<div class="row" style="margin-bottom:16px"><div class="field"><label>年份</label><select id="dashQYr">' +
+      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div></div>';
+    html += '<div id="qdashResult"></div>';
+    $('#dashBody').innerHTML = html;
+    $('#dashQYr').addEventListener('change', () => drawQuarterDash());
+    drawQuarterDash();
+
+    function drawQuarterDash() {
+      const y = parseInt($('#dashQYr').value, 10);
+      const qAll = AGG.quarterlyAggregate(recs).filter(x => x.year === y).sort((a, b) => a.quarter - b.quarter);
+      if (!qAll.length) { $('#qdashResult').innerHTML = '<div class="empty">' + y + '年暂无季度数据。</div>'; return; }
+      // 核心指标对比卡片（每季度一组）
+      let h = '<div class="section-h">各季度核心指标仪表盘</div>';
+      qAll.forEach(q => {
+        const v = q.values;
+        const gauges = [
+          gaugeCard('Q' + q.quarter + '课时生产总现金', fmt(v.monthCashTotal), '元', null, null),
+          gaugeCard('Q' + q.quarter + '生产完成率', pct(v.v1MonthRate), '', v.v1MonthRate != null ? v.v1MonthRate * 100 : null, 'var(--indigo)'),
+          gaugeCard('Q' + q.quarter + '续费人数', fmt(v.xfMonthNum), '人', null, null),
+          gaugeCard('Q' + q.quarter + '饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--green)'),
+        ];
+        h += '<div class="qtr-block"><div class="qtr-head">Q' + q.quarter + (q.missingMonths.length ? ' <span class="tag warn">缺' + q.missingMonths.map(m => m + '月').join('') + '</span>' : '') + '</div><div class="gauge-grid gauges-4">' + gauges.join('') + '</div></div>';
+      });
+      // 对比图表
+      h += '<div class="section-h">各季度指标对比</div>';
+      h += '<div class="field" style="margin-bottom:10px"><label>选择对比指标</label><select id="qCmpMetric">' +
+        '<option value="monthCashTotal">课时生产总现金</option><option value="v1MonthProduced">1V1生产课时</option><option value="v6MonthProduced">1V6生产课时</option>' +
+        '<option value="v1MonthRate">生产完成率</option><option value="monthSaturation">饱和度</option><option value="xfMonthNum">续费人数</option>' +
+        '<option value="xfMonthNumRate">续费人数率</option><option value="monthEff">人均效能值</option><option value="coreTeacherRatio">骨干教师占比</option>' +
+        '<option value="quitMonthRate">离职人数率</option></select></div>';
+      h += '<div class="chart-box"><canvas id="qCmpChart"></canvas></div>';
+      // 完整季度对比表
+      h += '<div class="section-h">完整季度数据对比</div><div class="table-wrap"><table><thead><tr><th>季度数据（名称）</th>';
+      qAll.forEach(q => h += '<th class="num">Q' + q.quarter + '</th>');
+      h += '</tr></thead><tbody>';
+      AGG.QUARTERLY_RULES.forEach(r => {
+        h += '<tr><td><div class="q-name">' + esc(r.label) + '</div><div class="q-src">' + esc(r.src) + '</div></td>';
+        qAll.forEach(q => h += '<td class="num">' + fmtQ(r.key, q.values[r.key]) + '</td>');
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+      h += '<div class="preview-note">说明：各季度汇总口径完全一致（率/均价取三月平均，生产完成率/总现金/金额占比/离职率按公式），便于横向比较。</div>';
+      $('#qdashResult').innerHTML = h;
+      // 对比柱状图
+      const sel = $('#qCmpMetric');
+      function drawCmp() {
+        destroyChart('qCmpChart');
+        const ctx = $('#qCmpChart'); if (!ctx) return;
+        const rule = AGG.QUARTERLY_RULES.find(r => r.key === sel.value);
+        const f = SCHEMA.weeklyFields.find(x => x.key === sel.value);
+        const isPct = f && f.type === 'ratio' && f.unit !== '比';
+        const data = qAll.map(q => {
+          const val = q.values[sel.value];
+          return (val != null && isFinite(val)) ? (isPct ? val * 100 : val) : null;
+        });
+        const labels = qAll.map(q => 'Q' + q.quarter);
+        charts['qCmpChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets: [{ label: rule ? rule.label : sel.value, data, backgroundColor: 'rgba(79,70,229,.75)', borderRadius: 5 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { callback: v => isPct ? v + '%' : fmt(v) } } } },
+        });
+      }
+      sel.addEventListener('change', drawCmp);
+      drawCmp();
+    }
+  }
+
   // —— 模板中心 ——
   function renderTemplates() {
     let html = '<div class="panel"><div class="panel-title">模板中心</div>';
@@ -728,6 +895,7 @@
     kpi: { title: '教师 KPI', render: renderKpi },
     satisfaction: { title: '五项满意度', render: renderSatisfaction },
     compare: { title: '对比中心', render: renderCompare },
+    dashboard: { title: '核心看板', render: renderDashboard },
     templates: { title: '模板中心', render: renderTemplates },
     data: { title: '数据备份', render: renderData },
   };
