@@ -25,11 +25,11 @@
     { key: 'doubleThreeCount', label: '双三老师人数', group: '人力', unit: '人', type: 'num' },
     { key: 'doubleThreeRatio', label: '双三老师占比', group: '人力', unit: '率', type: 'ratio' },
     // 学员
-    { key: 'v1Students', label: '1v1在读学员', group: '学员', unit: '人', type: 'num' },
-    { key: 'v1Subjects', label: '1v1在读单科', group: '学员', unit: '科', type: 'num' },
+    { key: 'v1Students', label: '1v1在读学员', group: '学员', unit: '人', type: 'num', aliases: ['1v1在读学员数', '1v1学员数', '1对1在读学员', '1对1在读学员数', '一对一在读学员', '一对一在读学员数'] },
+    { key: 'v1Subjects', label: '1v1在读单科', group: '学员', unit: '科', type: 'num', aliases: ['1v1在读单科数', '1v1单科数', '1对1在读单科', '1对1在读单科数', '一对一在读单科', '一对一在读单科数'] },
     { key: 'subjectRatio', label: '单科比', group: '学员', unit: '比', type: 'ratio' },
-    { key: 'v6Students', label: '1v6在读学员数', group: '学员', unit: '人', type: 'num' },
-    { key: 'v6Subjects', label: '1v6在读学单科', group: '学员', unit: '科', type: 'num' },
+    { key: 'v6Students', label: '1v6在读学员数', group: '学员', unit: '人', type: 'num', aliases: ['1v6在读学员', '1v6学员数', '1v6学员'] },
+    { key: 'v6Subjects', label: '1v6在读学单科', group: '学员', unit: '科', type: 'num', aliases: ['1v6在读单科', '1v6单科数', '1v6单科'] },
     { key: 'v6SubjectRatio', label: '1v6单科比', group: '学员', unit: '比', type: 'ratio' },
     // 课时生产
     { key: 'v1WeekTarget', label: '1V1周目标课时', group: '课时生产', unit: '课时', type: 'num' },
@@ -163,8 +163,14 @@
   const weeklyLabelMapCI = {};
   weeklyFields.forEach(f => { weeklyLabelMapCI[f.label.toLowerCase()] = f; });
 
+  // 别名反查表：支持带“数/量/个”后缀、空格、1对1/一对一 等常见变体
+  const weeklyLabelMapAliases = {};
+  weeklyFields.forEach(f => {
+    (f.aliases || []).forEach(a => { weeklyLabelMapAliases[a] = f; });
+  });
+
   CA.SCHEMA = {
-    weeklyFields, weeklyGroups, weeklyLabelMap, weeklyLabelMapCI, satisfactionItems,
+    weeklyFields, weeklyGroups, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
     kezuFields, kpiFields,
     streams: ['weekly', 'kezu', 'kpi'],
   };

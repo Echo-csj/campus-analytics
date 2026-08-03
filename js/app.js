@@ -418,7 +418,11 @@
         const p = r.res.period;
         const tip = [];
         if (!r.res.values.campus) tip.push('未识别校区');
-        if (r.res.unmatched && r.res.unmatched.length) tip.push('未匹配 ' + r.res.unmatched.length + ' 项');
+        if (r.res.unmatched && r.res.unmatched.length) {
+          const show = r.res.unmatched.slice(0, 5).map(u => '「' + u + '」').join('、');
+          const more = r.res.unmatched.length > 5 ? ' 等' + r.res.unmatched.length + '项' : '';
+          tip.push('<span class="warn">未匹配 ' + show + more + '</span>');
+        }
         if (!r.res.monthFromName) tip.push('<span class="warn">文件名未识别月份，已用默认月，请核对</span>');
         if (r.res.detected && r.res.detected.isMonthEnd) tip.push('<span class="ok">月度周报</span>');
         html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td><td class="num">' + (r.res.rows ? r.res.rows.length : r.res.fields) + '</td><td>' + (tip.join('；') || '<span class="ok">正常</span>') + '</td></tr>';

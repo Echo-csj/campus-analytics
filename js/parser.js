@@ -32,6 +32,11 @@
     return s + '%';
   }
 
+  // 标签清洗：去空格、去常见后缀，用于兜底模糊匹配
+  function normalizeLabel(s) {
+    return String(s).trim().replace(/\s+/g, '').replace(/[（(].*?[)）]/g, '').replace(/(数|量|个)$/g, '').toLowerCase();
+  }
+
   // —— 周报解析 ——
   function parseWeekly(file, ctx) {
     return new Promise((resolve, reject) => {
@@ -54,9 +59,11 @@
             // raw:true 下百分比格式单元格已返回小数；保留 isPct 仅用于文本型 "%" 旧数据兼容
             const isPct = /[%％]/.test(rawStr);
             const num = toNum(val);
-            // 规范字段映射：精确匹配优先，否则大小写不敏感匹配
+            // 规范字段映射：精确匹配 → 别名匹配 → 大小写不敏感 → 清洗后兜底匹配
             let f = CA.SCHEMA.weeklyLabelMap[lab];
+            if (!f) f = CA.SCHEMA.weeklyLabelMapAliases[lab];
             if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
+            if (!f) f = CA.SCHEMA.weeklyLabelMapCI[normalizeLabel(lab)] || CA.SCHEMA.weeklyLabelMapAliases[normalizeLabel(lab)];
             // 入库 values：比例类字段统一存为小数(0–1)
             let storeVal = (f && f.type === 'text') ? (val == null ? '' : String(val)) : num;
             if (f && f.type === 'ratio' && f.unit !== '比' && (isPct || (typeof storeVal === 'number' && storeVal > 1))) {
