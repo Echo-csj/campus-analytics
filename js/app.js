@@ -485,8 +485,7 @@
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
     let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」按《季度数据统计标准》列出的月度字段对齐）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用上方「历史周报批量入库」入库对应周期周报。</div>';
-    html += compareUploadPanelHTML();
+    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」按《季度数据统计标准》列出的月度字段对齐）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用下方「历史周报批量入库」入库对应周期周报。</div>';
     html += '<div class="row">';
     html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option><option value="qsummary">季度汇总（季度数据汇总）</option></select></div>';
     html += '<div class="field"><label>年份</label><select id="cmpYear">' + years.concat([yr]).filter((v, i, a) => a.indexOf(v) === i).map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '</option>').join('') + '</select></div>';
@@ -494,7 +493,9 @@
     html += '<div class="field" id="cmpQuarterField" style="display:none"><label>季度</label><select id="cmpQuarter">' + [1, 2, 3, 4].map(q => '<option value="' + q + '">Q' + q + '</option>').join('') + '</select></div>';
     html += '<button class="btn" id="cmpQExport" style="display:none">导出季度汇总 xlsx</button>';
     html += '</div>';
-    html += '<div id="cmpResult"></div></div>';
+    html += '<div id="cmpResult"></div>';
+    html += compareUploadPanelHTML();
+    html += '</div>';
     $('#content').innerHTML = html;
     wireCompareUpload();
 
@@ -534,7 +535,13 @@
 
   function renderCompareTable(cmp) {
     if (!cmp.columns.length) { $('#cmpResult').innerHTML = '<div class="empty">该范围暂无数据。</div>'; destroyChart('cmpChart'); return; }
-    let html = '<div class="table-wrap"><table><thead><tr><th>表格事项（原表）</th>';
+    // 选指标画柱状（仅含数值的对比项）—— 置于对比结果最上方
+    const metricRows = cmp.rows.filter(r => r.values.some(c => c && c.num != null));
+    let html = '<div class="section-h">柱状对比（选指标）</div><div class="field"><select id="cmpMetric">' +
+      metricRows.map(r => '<option value="' + esc(r.key) + '">' + r.label + '</option>').join('') + '</select></div>';
+    html += '<div class="chart-box"><canvas id="cmpChart"></canvas></div>';
+    html += '<div class="preview-note">说明：柱状对比按所选指标并排展示各对比列数值；下方为完整对比明细表。</div>';
+    html += '<div class="table-wrap"><table><thead><tr><th>表格事项（原表）</th>';
     cmp.columns.forEach(c => html += '<th class="num">' + c.label + '</th>');
     html += '</tr></thead><tbody>';
     cmp.rows.forEach(r => {
@@ -544,11 +551,6 @@
     });
     html += '</tbody></table></div>';
     html += '<div class="preview-note">说明：月度/季度对比按各周报「数据统计表」原始事项对齐；年度对比仅展示《季度数据统计标准》列出的月度字段，并保持与该标准一致的顺序。某列未出现的项留空。</div>';
-    // 选指标画柱状（仅含数值的对比项）
-    const metricRows = cmp.rows.filter(r => r.values.some(c => c && c.num != null));
-    html += '<div class="section-h">柱状对比（选指标）</div><div class="field"><select id="cmpMetric">' +
-      metricRows.map(r => '<option value="' + esc(r.key) + '">' + r.label + '</option>').join('') + '</select></div>';
-    html += '<div class="chart-box"><canvas id="cmpChart"></canvas></div>';
     $('#cmpResult').innerHTML = html;
     const sel = $('#cmpMetric');
     function drawChart() {
@@ -915,7 +917,7 @@
 
   function init() {
     $all('.nav-item').forEach(b => b.addEventListener('click', () => go(b.dataset.tab)));
-    go('weekly');
+    go('dashboard');
     updateCount();
   }
 
