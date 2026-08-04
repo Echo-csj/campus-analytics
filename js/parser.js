@@ -46,17 +46,23 @@
           const wb = XLSX.read(e.target.result, { type: 'array' });
           let ws = wb.Sheets['数据统计表'] || wb.Sheets[wb.SheetNames[0]];
           const matrix = sheetToMatrix(ws);
+          // 同时取「格式化文本」矩阵：用于识别「自定义百分比格式」单元格
+          // （显示带 % 但底层值 ≤1，如单元格格式 0.00"%" + 填 0.78 → 显示 0.78% 但底层存 0.78），
+          // 若不处理会被当成小数分数直接显示成 78%。普通百分比格式(0.00%)底层已是小数，不受影响。
+          const fmtMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
           const values = {};
           let unmatched = [];
           let rows = [];   // 忠实保留原表每一行的「事项→值」，供对比中心按原表对齐
           let weekSeq = null, totalWeeks = null;
-          for (const row of matrix) {
+          matrix.forEach((row, i) => {
             const label = row[0];
             const val = row[1];
-            if (label == null) continue;
+            if (label == null) return;
             const lab = String(label).trim();
             const rawStr = (val == null ? '' : String(val).trim());
-            // raw:true 下百分比格式单元格已返回小数；保留 isPct 仅用于文本型 "%" 旧数据兼容
+            const fmtCell = (fmtMatrix[i] && fmtMatrix[i][1] != null) ? String(fmtMatrix[i][1]).trim() : '';
+            const fmtHasPct = /[%％]/.test(fmtCell);
+            // raw:true 下百分比格式单元格已返回小数；fmtHasPct 用于自定义%格式单元格
             const isPct = /[%％]/.test(rawStr);
             const num = toNum(val);
             // 规范字段映射：精确匹配 → 别名匹配 → 大小写不敏感 → 清洗后兜底匹配
@@ -66,8 +72,14 @@
             if (!f) f = CA.SCHEMA.weeklyLabelMapCI[normalizeLabel(lab)] || CA.SCHEMA.weeklyLabelMapAliases[normalizeLabel(lab)];
             // 入库 values：比例类字段统一存为小数(0–1)
             let storeVal = (f && f.type === 'text') ? (val == null ? '' : String(val)) : num;
-            if (f && f.type === 'ratio' && f.unit !== '比' && (isPct || (typeof storeVal === 'number' && storeVal > 1))) {
-              storeVal = storeVal / 100;
+            if (f && f.type === 'ratio' && f.unit !== '比') {
+              if (fmtHasPct && typeof num === 'number' && num <= 1) {
+                // 自定义百分比格式（显示带%但底层值≤1）：按格式化文本（含%）解析后÷100
+                const pn = toNum(fmtCell);
+                if (pn != null) storeVal = pn / 100;
+              } else if (isPct || (typeof storeVal === 'number' && storeVal > 1)) {
+                storeVal = storeVal / 100;
+              }
             }
             // rows：供对比中心按原表对齐显示用。比率字段统一做标准化显示，避免 7039% 这类异常。
             let cellNum = num, cellText = rawStr, cellIsPct = isPct;
@@ -84,7 +96,7 @@
             } else {
               unmatched.push(lab);
             }
-          }
+          });
           const isMonthEnd = (weekSeq != null && totalWeeks != null) ? (weekSeq === totalWeeks) : false;
           resolve({ values, unmatched, rows, detected: { weekSeq, totalWeeks, isMonthEnd } });
         } catch (err) { reject(err); }
@@ -102,6 +114,7 @@
           const wb = XLSX.read(e.target.result, { type: 'array' });
           const ws = wb.Sheets[wb.SheetNames[0]];
           const matrix = sheetToMatrix(ws);
+          const fmtMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
           const mapping = CA.templates.getMapping(stream);
           // 找到表头行（含 dimensionHeader）
           let headerIdx = -1;
@@ -127,11 +140,21 @@
                 if (key === 'dimension') return;
                 const raw = row[ci];
                 const rawStr = (raw == null ? '' : String(raw).trim());
+                const fmtStr = (fmtMatrix[i] && fmtMatrix[i][ci] != null) ? String(fmtMatrix[i][ci]).trim() : '';
                 const rawHasPct = /[%％]/.test(rawStr);
+                const fmtHasPct = /[%％]/.test(fmtStr);
                 let v = (raw == null ? null : (typeof raw === 'number' ? raw : (key === 'subjectGroup' ? String(raw) : toNum(raw))));
                 const fdef = fieldDef(key);
-                // 比例类字段：带「%」号或 >1 时按百分数归一为小数（98%→0.98，0.97%→0.0097）；「比」类保持原值
-                if (fdef && fdef.type === 'ratio' && fdef.unit !== '比' && (rawHasPct || (typeof v === 'number' && v > 1))) v = v / 100;
+                // 比例类字段：自定义%格式(显示带%且底层≤1)按格式化文本÷100；否则带「%」号或 >1 时按百分数归一为小数；
+                // 「比」类保持原值
+                if (fdef && fdef.type === 'ratio' && fdef.unit !== '比') {
+                  if (fmtHasPct && typeof v === 'number' && v <= 1) {
+                    const pn = toNum(fmtStr);
+                    if (pn != null) v = pn / 100;
+                  } else if (rawHasPct || (typeof v === 'number' && v > 1)) {
+                    v = v / 100;
+                  }
+                }
                 vals[key] = v;
               } else if (h) {
                 if (!unmatchedCols.includes(h)) unmatchedCols.push(h);
