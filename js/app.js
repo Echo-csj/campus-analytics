@@ -116,40 +116,11 @@
     const ctx = { year: yr, month: mo, week: wk };
     const preview = $('#preview_' + stream);
     preview.innerHTML = '<div class="preview-note">解析中…</div>';
-    const p = stream === 'weekly' ? PARSER.parseWeekly(file, ctx) : PARSER.parseDimension(file, stream, ctx);
-    p.then(res => {
-      if (stream === 'weekly') {
-        pending = { stream, ctx, values: res.values, unmatched: res.unmatched, detected: res.detected };
-        renderWeeklyPreview(stream, res);
-      } else {
-        pending = { stream, ctx, rows: res.rows, unmatchedCols: res.unmatchedCols };
-        renderDimensionPreview(stream, res);
-      }
+    // 周报入库已统一在「对比中心 → 历史周报批量入库」完成；此处仅处理科组/教师维度周报
+    PARSER.parseDimension(file, stream, ctx).then(res => {
+      pending = { stream, ctx, rows: res.rows, unmatchedCols: res.unmatchedCols };
+      renderDimensionPreview(stream, res);
     }).catch(err => { preview.innerHTML = '<div class="preview-note warn-cell">解析失败：' + err.message + '</div>'; });
-  }
-
-  function renderWeeklyPreview(stream, res) {
-    const v = res.values;
-    let html = '<div class="preview-note">已提取 <b>' + Object.keys(v).length + '</b> 项';
-    if (res.detected.weekSeq != null) html += ' ｜ 第' + res.detected.weekSeq + '周 / 当月共' + res.detected.totalWeeksOfMonth + '周';
-    if (res.detected.isMonthEnd) html += ' ｜ <span class="tag me">识别为月度周报（月末周）</span>';
-    html += '</div>';
-    if (res.unmatched.length) html += '<div class="preview-note warn-cell">⚠ 未匹配标签（可忽略或确认模板）：' + res.unmatched.join('、') + '</div>';
-    // 分组展示
-    SCHEMA.weeklyGroups.forEach(g => {
-      const fs = SCHEMA.weeklyFields.filter(f => f.group === g && v[f.key] != null);
-      if (!fs.length) return;
-      html += '<div class="section-h">' + g + '</div><div class="table-wrap"><table><tbody>';
-      fs.forEach(f => { html += '<tr><td>' + f.label + '</td><td class="num">' + weeklyVal(f, v[f.key]) + '</td></tr>'; });
-      html += '</tbody></table></div>';
-    });
-    html += '<div class="row" style="margin-top:14px"><button class="btn primary" id="confirm_' + stream + '">确认入库</button><button class="btn ghost" id="cancel_' + stream + '">取消</button></div>';
-    $('#preview_' + stream).innerHTML = html;
-    $('#confirm_' + stream).addEventListener('click', () => {
-      STORE.upsert({ stream: 'weekly', year: pending.ctx.year, month: pending.ctx.month, week: pending.ctx.week, campus: v.campus || '泉山', values: v, rows: res.rows, importedAt: Date.now() });
-      toast('周报已入库'); pending = null; renderWeekly();
-    });
-    $('#cancel_' + stream).addEventListener('click', () => { $('#preview_' + stream).innerHTML = ''; pending = null; });
   }
 
   function renderDimensionPreview(stream, res) {
@@ -179,18 +150,13 @@
   }
 
   // —— 周报视图 ——
-  function renderWeekly() {
+  function renderCmpWeekly() {
     const recs = STORE.list('weekly').sort((a, b) => (b.year - a.year) || (b.month - b.month) || (b.week - b.week));
-    let html = uploadPanelHTML('weekly');
-
-    html += renderHeroStats(recs[0] || null, recs[1] || null);
-
+    let html = renderHeroStats(recs[0] || null, recs[1] || null);
     html += '<div class="panel"><div class="panel-title">已录入周报（' + recs.length + '）</div>';
-    html += '<div class="panel-desc">每月最后一周（周序号=当月周数）自动标记为「月度周报」，供对比中心与五项满意度使用。</div>';
-    const p = inferPeriod();
+    html += '<div class="panel-desc">每月最后一周（周序号=当月周数）自动标记为「月度周报」，供对比中心与五项满意度使用。点击「查看」展开该周全部字段；可单条删除。</div>';
     if (!recs.length) {
-      html += '<div class="empty">还没有 <b>' + p.year + '年' + p.month + '月 第' + p.week + '周</b> 的 DOS 周报。' +
-        '<div class="empty-cta">上传一份周报，或去「数据备份 → 载入示例数据」查看效果。</div></div>';
+      html += '<div class="empty">还没有周报记录。请到「横向对比」页签用「历史周报批量入库」上传 DOS 周报。</div>';
     } else {
       html += '<div class="rec-list">';
       recs.forEach((r, i) => {
@@ -206,8 +172,7 @@
       html += '</div>';
     }
     html += '</div>';
-    $('#content').innerHTML = html;
-    wireUpload('weekly');
+    $('#cmpBody').innerHTML = html;
     $all('.act-view').forEach(b => b.addEventListener('click', () => {
       const i = b.closest('.rec-row').dataset.rec; const r = recs[i];
       const dr = $('#detail_' + i);
@@ -216,7 +181,7 @@
     }));
     $all('.act-del').forEach(b => b.addEventListener('click', () => {
       const i = b.closest('.rec-row').dataset.rec; const r = recs[i];
-      STORE.remove('weekly', r.year, r.month, r.week); toast('已删除'); renderWeekly(); updateCount();
+      STORE.remove('weekly', r.year, r.month, r.week); toast('已删除'); renderCmpWeekly(); updateCount();
     }));
   }
 
@@ -483,15 +448,28 @@
     });
   }
 
-  // —— 对比中心 ——
+  // —— 对比中心（含「横向对比」与「周报明细」两个子页签）——
   function renderCompare() {
+    let html = '<div class="panel"><div class="panel-title">对比中心</div>';
+    html += '<div class="panel-desc">对比中心含两类视图：<b>横向对比</b>（月度/季度/年度/季度汇总的层汇总单元并排，周报上传在下方「历史周报批量入库」）与 <b>周报明细</b>（周维度环比、单周钻取与记录管理）。</div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="cmp">横向对比</button><button class="dash-tab" data-sub="weekly">周报明细</button></div>';
+    html += '<div id="cmpBody"></div></div>';
+    $('#content').innerHTML = html;
+    $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
+      $all('.dash-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      if (b.dataset.sub === 'cmp') renderCmpCompare();
+      else renderCmpWeekly();
+    }));
+    renderCmpCompare();
+  }
+
+  function renderCmpCompare() {
     const recs = STORE.list('weekly');
     const years = AGG.yearOptions(recs);
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
     const now = new Date();
-    let html = '<div class="panel"><div class="panel-title">对比中心</div>';
-    html += '<div class="panel-desc">对比中心包含两类能力：<b>横向对比</b>（下一层汇总单元并排：月度=当月各周｜季度=当季各月「月度周报」｜年度=全年各月「月度周报」按《季度数据统计标准》列出的月度字段对齐）；<b>季度汇总</b>（将当季三月「月度周报」按《季度数据统计标准》汇总为一份季度数据）。若显示「暂无数据」，先用下方「历史周报批量入库」入库对应周期周报。</div>';
-    html += '<div class="row">';
+    let html = '<div class="row">';
     html += '<div class="field"><label>对比类型</label><select id="cmpType"><option value="month">月度对比（各周）</option><option value="quarter">季度对比（各月）</option><option value="year">年度对比（各月）</option><option value="qsummary">季度汇总（季度数据汇总）</option></select></div>';
     html += '<div class="field"><label>年份</label><select id="cmpYear">' + years.concat([yr]).filter((v, i, a) => a.indexOf(v) === i).map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '</option>').join('') + '</select></div>';
     html += '<div class="field" id="cmpMonthField"><label>月份</label><select id="cmpMonth">' + Array.from({ length: 12 }, (_, i) => '<option value="' + (i + 1) + '"' + (i + 1 === now.getMonth() + 1 ? ' selected' : '') + '>' + (i + 1) + '月</option>').join('') + '</select></div>';
@@ -500,8 +478,7 @@
     html += '</div>';
     html += '<div id="cmpResult"></div>';
     html += compareUploadPanelHTML();
-    html += '</div>';
-    $('#content').innerHTML = html;
+    $('#cmpBody').innerHTML = html;
     wireCompareUpload();
 
     const typeSel = $('#cmpType'), yrSel = $('#cmpYear'), moSel = $('#cmpMonth'), qSel = $('#cmpQuarter');
@@ -904,7 +881,6 @@
 
   // —— 路由 ——
   const tabs = {
-    weekly: { title: '周报', render: renderWeekly },
     kezu: { title: '最佳科组', render: renderKezu },
     kpi: { title: '教师 KPI', render: renderKpi },
     compare: { title: '对比中心', render: renderCompare },
