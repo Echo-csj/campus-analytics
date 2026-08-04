@@ -185,6 +185,18 @@
     }));
   }
 
+  // 统计周报中的异常比率字段（超出 [0,1] 区间的百分数）
+  function countAnomalies(values) {
+    let n = 0;
+    SCHEMA.weeklyFields.forEach(f => {
+      if (f.type !== 'ratio' || f.unit === '比') return;
+      const val = values[f.key];
+      if (val == null || typeof val !== 'number' || !isFinite(val)) return;
+      if (val > 1 || val < 0) n++;
+    });
+    return n;
+  }
+
   function heroStat(k, v, delta, isRatio, emptyNote) {
     let dClass = 'flat', dTxt = emptyNote || '— 暂无上周对比';
     if (delta != null) {
@@ -198,21 +210,29 @@
   function renderHeroStats(latest, prev) {
     if (!latest) {
       const cards = [
-        heroStat('周课时生产', '—', null, false, '上传周报后显示'),
-        heroStat('周完成率（1V1）', '—', null, true, '上传周报后显示'),
-        heroStat('周续费率（人数）', '—', null, true, '上传周报后显示'),
-        heroStat('校周均', '—', null, false, '上传周报后显示'),
+        heroStat('1V1学员数', '—', null, false, '上传周报后显示'),
+        heroStat('1V1单科数', '—', null, false, '上传周报后显示'),
+        heroStat('周度周平均', '—', null, false, '上传周报后显示'),
+        heroStat('异常值预警', '—', null, false, '上传周报后显示'),
       ];
       return '<div class="stat-grid">' + cards.join('') + '</div>';
     }
     const v = latest.values, pv = prev ? prev.values : null;
-    const produced = (v.v1WeekProduced || 0) + (v.v6WeekProduced || 0);
-    const pProduced = pv ? ((pv.v1WeekProduced || 0) + (pv.v6WeekProduced || 0)) : null;
+    const anomalies = countAnomalies(v);
+    const pAnomalies = pv ? countAnomalies(pv) : null;
+    const aDelta = pAnomalies == null ? null : anomalies - pAnomalies;
+    let aHtml = '', aClass = 'flat', aTxt = '— 暂无上周对比';
+    if (aDelta != null) {
+      if (aDelta > 0) { aClass = 'down'; aTxt = '▲ +' + aDelta + ' 项 环比上周'; }
+      else if (aDelta < 0) { aClass = 'up'; aTxt = '▼ ' + aDelta + ' 项 环比上周'; }
+      else { aClass = 'up'; aTxt = '— 与上周持平'; }
+    }
+    aHtml = '<div class="stat-card"><div class="k">异常值预警</div><div class="v' + (anomalies ? '' : ' sm') + '">' + (anomalies ? anomalies + ' 项异常' : '正常') + '</div><div class="delta ' + aClass + '">' + aTxt + '</div></div>';
     const cards = [
-      heroStat('周课时生产', fmt(produced), pProduced == null ? null : produced - pProduced, false),
-      heroStat('周完成率（1V1）', pct(v.v1WeekRate), pv ? (v.v1WeekRate - pv.v1WeekRate) : null, true),
-      heroStat('周续费率（人数）', pct(v.xfWeekNumRate), pv ? (v.xfWeekNumRate - pv.xfWeekNumRate) : null, true),
-      heroStat('校周均', fmt(v.schoolWeekAvg, 1), pv ? (v.schoolWeekAvg - pv.schoolWeekAvg) : null, false),
+      heroStat('1V1学员数', fmt(v.v1Students), pv ? (v.v1Students - pv.v1Students) : null, false),
+      heroStat('1V1单科数', fmt(v.v1Subjects), pv ? (v.v1Subjects - pv.v1Subjects) : null, false),
+      heroStat('周度周平均', fmt(v.v1WeekUnitAvg, 2), pv ? (v.v1WeekUnitAvg - pv.v1WeekUnitAvg) : null, false),
+      aHtml,
     ];
     return '<div class="stat-grid">' + cards.join('') + '</div>';
   }
