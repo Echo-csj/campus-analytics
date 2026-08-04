@@ -34,6 +34,12 @@
     if (s.indexOf('.') >= 0) s = s.replace(/\.?0+$/, '');
     return s + '%';
   }
+  // 周报字段显示：区分「百分数」（unit=率，存小数，×100 显示）与「倍数」（unit=比，如单科比 1.8，不得当百分数）
+  function weeklyVal(f, v) {
+    if (f && f.type === 'ratio' && f.unit === '比') return fmt(v, 2);
+    if (f && f.type === 'ratio') return pct(v);
+    return fmt(v);
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
   function parseFileWeek(name) {
     const m = String(name).match(/第\s*(\d+)\s*周/);
@@ -134,7 +140,7 @@
       const fs = SCHEMA.weeklyFields.filter(f => f.group === g && v[f.key] != null);
       if (!fs.length) return;
       html += '<div class="section-h">' + g + '</div><div class="table-wrap"><table><tbody>';
-      fs.forEach(f => { html += '<tr><td>' + f.label + '</td><td class="num">' + (f.type === 'ratio' ? pct(v[f.key]) : fmt(v[f.key])) + '</td></tr>'; });
+      fs.forEach(f => { html += '<tr><td>' + f.label + '</td><td class="num">' + weeklyVal(f, v[f.key]) + '</td></tr>'; });
       html += '</tbody></table></div>';
     });
     html += '<div class="row" style="margin-top:14px"><button class="btn primary" id="confirm_' + stream + '">确认入库</button><button class="btn ghost" id="cancel_' + stream + '">取消</button></div>';
@@ -252,7 +258,7 @@
       const fs = SCHEMA.weeklyFields.filter(f => f.group === g && r.values[f.key] != null);
       if (!fs.length) return;
       h += '<div class="section-h">' + g + '</div><div class="kpi-cards">';
-      fs.forEach(f => { h += '<div class="kpi-card"><div class="k">' + f.label + '</div><div class="v small">' + (f.type === 'ratio' ? pct(r.values[f.key]) : fmt(r.values[f.key])) + '</div></div>'; });
+      fs.forEach(f => { h += '<div class="kpi-card"><div class="k">' + f.label + '</div><div class="v small">' + weeklyVal(f, r.values[f.key]) + '</div></div>'; });
       h += '</div>';
     });
     return h + '</div>';

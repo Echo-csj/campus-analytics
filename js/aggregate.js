@@ -65,7 +65,8 @@
     if (rec.rows && rec.rows.length) return rec.rows;
     const v = rec.values || {};
     return CA.SCHEMA.weeklyFields.filter(f => v[f.key] != null).map(f => {
-      const isPct = f.type === 'ratio';
+      const isBi = f.unit === '比';                       // 倍数（如单科比 1.8）不当百分数
+      const isPct = f.type === 'ratio' && !isBi;
       const raw = v[f.key];
       const base = (typeof raw === 'number') ? raw : CA.parser.toNum(raw);
       let num, text;
