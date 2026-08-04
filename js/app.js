@@ -1,6 +1,6 @@
 /*
  * app.js — UI 控制器
- * 三大板块（周报/最佳科组/教师KPI）+ 五项满意度 + 对比中心 + 模板中心 + 数据备份
+ * 三大板块（周报/最佳科组/教师KPI）+ 对比中心 + 核心看板（含年度/季度/五项满意度）+ 模板中心 + 数据备份
  */
 (function (global) {
   'use strict';
@@ -342,11 +342,11 @@
     wireUpload('kpi');
   }
 
-  // —— 五项满意度 ——
-  function renderSatisfaction() {
+  // —— 五项满意度（核心看板子页签）——
+  function renderSatDashboard() {
     const recs = STORE.list('weekly');
     const data = AGG.satisfactionFromMonthEnd(recs);
-    let html = '<div class="panel"><div class="panel-title">五项满意度（月度，自动从月度周报提取）</div>';
+    let html = '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
     if (!data.length) html += '<div class="empty">尚无月度周报数据。请先上传各月最后一周的 DOS 周报。</div>';
     else {
@@ -361,8 +361,7 @@
       });
       html += '</tbody></table></div>';
     }
-    html += '</div>';
-    $('#content').innerHTML = html;
+    $('#dashBody').innerHTML = html;
     if (data.length) {
       const labels = data.map(r => r.year + '/' + r.month);
       const ds = SCHEMA.satisfactionItems.map((it, idx) => ({
@@ -646,14 +645,15 @@
   function renderDashboard() {
     let html = '<div class="panel"><div class="panel-title">核心数据看板</div>';
     html += '<div class="panel-desc">基于《年度数据统计标准》和《季度数据统计标准》汇总，以仪表盘形式直观呈现年度核心指标和各季度对比趋势。数据源为各月「月度周报」。</div>';
-    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button></div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button></div>';
     html += '<div id="dashBody"></div></div>';
     $('#content').innerHTML = html;
     $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
       $all('.dash-tab').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       if (b.dataset.sub === 'year') renderYearDashboard();
-      else renderQuarterDashboard();
+      else if (b.dataset.sub === 'quarter') renderQuarterDashboard();
+      else renderSatDashboard();
     }));
     renderYearDashboard();
   }
@@ -907,7 +907,6 @@
     weekly: { title: '周报', render: renderWeekly },
     kezu: { title: '最佳科组', render: renderKezu },
     kpi: { title: '教师 KPI', render: renderKpi },
-    satisfaction: { title: '五项满意度', render: renderSatisfaction },
     compare: { title: '对比中心', render: renderCompare },
     dashboard: { title: '核心看板', render: renderDashboard },
     templates: { title: '模板中心', render: renderTemplates },
