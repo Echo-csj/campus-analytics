@@ -36,6 +36,95 @@
     return s + '%';
   }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  // 导出数值格式化：比例(率)以百分数数值(×100)呈现，比类保持原倍数，其余保持数值
+  function fmtExport(key, val) {
+    if (val == null || (typeof val === 'number' && !isFinite(val))) return '';
+    const f = SCHEMA.weeklyFields.find(x => x.key === key);
+    if (f && f.type === 'ratio' && f.unit === '比') return +(+val).toFixed(4);
+    if (f && f.type === 'ratio') return +(val * 100).toFixed(2);
+    if (typeof val === 'number') return val;
+    return val;
+  }
+
+  // 通用多 sheet Excel 导出（基于 SheetJS / XLSX）
+  function exportSheets(filename, sheets) {
+    if (typeof XLSX === 'undefined') { toast('导出组件未加载，请刷新重试'); return; }
+    const wb = XLSX.utils.book_new();
+    sheets.forEach(s => {
+      const aoa = [s.header];
+      (s.rows || []).forEach(r => aoa.push(r));
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // 表头加粗 + 浅色底
+      const range = XLSX.utils.decode_range(ws['!ref']);
+      for (let c = range.s.c; c <= range.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (!ws[addr]) ws[addr] = {};
+        ws[addr].s = { font: { bold: true, color: '1E293B' }, fill: { fgColor: 'EEF2FF' }, alignment: { vertical: 'center', wrapText: true } };
+      }
+      // 列宽自适应
+      const wscols = s.header.map((h, i) => {
+        let max = String(h == null ? '' : h).length;
+        (s.rows || []).forEach(r => { const v = r[i]; if (v != null) max = Math.max(max, String(v).length); });
+        return { wch: Math.min(42, Math.max(10, max + 2)) };
+      });
+      ws['!cols'] = wscols;
+      XLSX.utils.book_append_sheet(wb, ws, String(s.name).slice(0, 31));
+    });
+    XLSX.writeFile(wb, filename.endsWith('.xlsx') ? filename : filename + '.xlsx');
+    toast('已导出 ' + filename);
+  }
+
+  // —— 导出：数据源 · 数据库视图（年度各月对比原始数据）——
+  function exportDataSource(recs, year) {
+    const cmp = AGG.compareYearStandard(recs, year);
+    if (!cmp.columns.length) { toast('该年暂无数据'); return; }
+    const header = ['月度原数据（字段）'].concat(cmp.columns.map(c => c.label));
+    const rows = cmp.rows.map(r => [r.label].concat(r.values.map(c => (c == null ? '' : (c.num != null ? c.num : c.text)))));
+    exportSheets('数据源_年度各月对比_' + year + '年.xlsx', [{ name: '年度各月对比', header, rows }]);
+  }
+
+  // —— 导出：核心看板 · 年度汇总 ——
+  function exportYearDashboard(recs, year) {
+    const yd = AGG.yearlyAggregate(recs, year);
+    if (!yd) { toast('该年暂无数据'); return; }
+    const v = yd.values;
+    const header1 = ['年度数据（名称）', '年度数据值', '月度原数据', '年度数据填写标准'];
+    const rows1 = AGG.YEARLY_RULES.map(r => [r.label, fmtExport(r.key, v[r.key]), r.src, r.ruleText]);
+    const header2 = ['核心指标', '数值'];
+    const rows2 = [
+      ['年度课时生产总现金(元)', v.monthCashTotal != null ? Math.round(v.monthCashTotal) : ''],
+      ['年度生产完成率(%)', v.v1MonthRate != null ? +(v.v1MonthRate * 100).toFixed(2) : ''],
+      ['年度1V1生产课时', v.v1MonthProduced != null ? Math.round(v.v1MonthProduced) : ''],
+      ['年度1V6生产课时', v.v6MonthProduced != null ? Math.round(v.v6MonthProduced) : ''],
+      ['年度人均效能值', v.monthEff != null ? +v.monthEff.toFixed(2) : ''],
+      ['年度饱和度(%)', v.monthSaturation != null ? +(v.monthSaturation * 100).toFixed(2) : ''],
+      ['年度续费人数', v.xfMonthNum != null ? Math.round(v.xfMonthNum) : ''],
+      ['年度骨干教师占比(%)', v.coreTeacherRatio != null ? +(v.coreTeacherRatio * 100).toFixed(2) : ''],
+    ];
+    exportSheets('核心看板_年度汇总_' + year + '年.xlsx', [
+      { name: '年度数据明细', header: header1, rows: rows1 },
+      { name: '核心指标', header: header2, rows: rows2 },
+    ]);
+  }
+
+  // —— 导出：核心看板 · 季度对比 ——
+  function exportQuarterDashboard(recs, year) {
+    const qAll = AGG.quarterlyAggregate(recs).filter(x => x.year === year).sort((a, b) => a.quarter - b.quarter);
+    if (!qAll.length) { toast('该年暂无季度数据'); return; }
+    const header = ['季度数据（名称）', '月度原数据'].concat(qAll.map(q => 'Q' + q.quarter));
+    const rows = AGG.QUARTERLY_RULES.map(r => [r.label, r.src].concat(qAll.map(q => fmtExport(r.key, q.values[r.key]))));
+    exportSheets('核心看板_季度对比_' + year + '年.xlsx', [{ name: '季度数据对比', header, rows }]);
+  }
+
+  // —— 导出：核心看板 · 五项满意度 ——
+  function exportSatDashboard(recs) {
+    const data = AGG.satisfactionFromMonthEnd(recs);
+    if (!data.length) { toast('暂无满意度数据'); return; }
+    const header = ['年', '月'].concat(SCHEMA.satisfactionItems.map(it => it.name + '(%)'));
+    const rows = data.map(r => [r.year, r.month].concat(SCHEMA.satisfactionItems.map(it => r[it.key] != null ? +(r[it.key] * 100).toFixed(2) : '')));
+    exportSheets('核心看板_五项满意度.xlsx', [{ name: '五项满意度', header, rows }]);
+  }
   function parseFileWeek(name) {
     const m = String(name).match(/第\s*(\d+)\s*周/);
     return m ? parseInt(m[1], 10) : 4;
@@ -226,7 +315,8 @@
   function renderSatDashboard() {
     const recs = STORE.list('weekly');
     const data = AGG.satisfactionFromMonthEnd(recs);
-    let html = '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
+    let html = '<div class="row" style="margin-bottom:12px"><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div>';
+    html += '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
     if (!data.length) html += '<div class="empty">尚无月度周报数据。请先上传各月最后一周的 DOS 周报。</div>';
     else {
@@ -242,6 +332,7 @@
       html += '</tbody></table></div>';
     }
     $('#dashBody').innerHTML = html;
+    $('#satExportBtn').addEventListener('click', () => exportSatDashboard(recs));
     if (data.length) {
       const labels = data.map(r => r.year + '/' + r.month);
       const ds = SCHEMA.satisfactionItems.map((it, idx) => ({
@@ -377,8 +468,9 @@
     const recs = STORE.list('weekly');
     const years = AGG.yearOptions(recs);
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
-    let html = '<div class="row">';
+    let html = '<div class="row" style="align-items:flex-end">';
     html += '<div class="field"><label>年份</label><select id="cmpYear">' + years.concat([yr]).filter((v, i, a) => a.indexOf(v) === i).map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>';
+    html += '<button class="btn sm" id="cmpExportBtn">⬇ 导出 Excel</button>';
     html += '</div>';
     html += '<div id="cmpResult"></div>';
     html += compareUploadPanelHTML();
@@ -386,6 +478,7 @@
     wireCompareUpload();
 
     const yrSel = $('#cmpYear');
+    $('#cmpExportBtn').addEventListener('click', () => { const y = parseInt(yrSel.value, 10); exportDataSource(recs, y); });
     function draw() {
       const y = parseInt(yrSel.value, 10);
       if (!years.length) { $('#cmpResult').innerHTML = '<div class="empty">暂无数据。请先用下方「历史周报批量入库」上传各月月度周报。</div>'; destroyChart('cmpChart'); return; }
@@ -479,11 +572,13 @@
     const years = AGG.yearOptions(recs);
     if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库各月月度周报。</div>'; return; }
     const yr = Math.max(...years);
-    let html = '<div class="row" style="margin-bottom:16px"><div class="field"><label>年份</label><select id="dashYr">' +
-      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div></div>';
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashYr">' +
+      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
+      '<button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button></div>';
     html += '<div id="ydashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashYr').addEventListener('change', () => drawYearDash());
+    $('#yrExportBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportYearDashboard(recs, y); });
     drawYearDash();
 
     function drawYearDash() {
@@ -543,11 +638,13 @@
     const years = AGG.yearOptions(recs);
     if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库各月月度周报。</div>'; return; }
     const yr = Math.max(...years);
-    let html = '<div class="row" style="margin-bottom:16px"><div class="field"><label>年份</label><select id="dashQYr">' +
-      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div></div>';
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashQYr">' +
+      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
+      '<button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button></div>';
     html += '<div id="qdashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashQYr').addEventListener('change', () => drawQuarterDash());
+    $('#qExportBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportQuarterDashboard(recs, y); });
     drawQuarterDash();
 
     function drawQuarterDash() {
