@@ -91,11 +91,6 @@
     const pct = clamp(rate / 0.75, 0, 1);
     return CONFIG.trm.satItems.progressRate * pct;
   }
-  // 专业考：按比例（合格率标准50%）→ 分值（封顶100%）
-  function profScore(rate) {
-    const pct = clamp(rate / 0.5, 0, 1);
-    return (CONFIG.trm.satTotal - Object.values(CONFIG.trm.satItems).reduce((a, b) => a + b, 0) + CONFIG.trm.satItems.progressRate) * 0; // 占位
-  }
 
   // TRM 总分：传入某学科组一季度三个月的生产周平均 + 月度均值指标
   function trmScore({ prodAvg3, quitRate, tjRate, xfRate, tkRate, jkRate, tfCashRate, tfNumRate, progressRate }) {

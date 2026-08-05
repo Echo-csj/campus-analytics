@@ -1,10 +1,10 @@
 /*
  * aggregate.js — 汇聚与对比（派生，不修改原始记录）
- * 对比逻辑统一：下一层汇总单元横向并排
- *   月度对比 = 当月各周周报横向
- *   季度对比 = 当季各月「月度周报」横向
- *   年度对比 = 全年各月「月度周报」横向
- * 月度周报 = 每月最后一周（weekSeq === totalWeeksOfMonth）
+ * 固定数据源：所有汇总指标均在此层从 store 的「月度周报」派生，UI 不散算。
+ *   季度汇总 = 当季各月「月度周报」横向聚合（last / sum / avg / derived）
+ *   年度汇总 = 全年各月「月度周报」横向聚合
+ *   数据库视图 = 全年各月「月度周报」按标准字段逐项并排（compareYearStandard）
+ * 月度周报 = 每月最后一周（weekSeq === totalWeeksOfMonth），统一口径见 monthEndWeeklies。
  */
 (function (global) {
   'use strict';
@@ -36,8 +36,19 @@
       result.push(pick);
     });
     result.sort((a, b) => (a.year - b.year) || (a.month - b.month));
-    // 兼容旧数据：比例字段统一归一化为小数
-    return result.map(r => normalizeWeeklyValues(r));
+    // 兼容旧数据 + 统一口径：
+    // 1) 比例字段防御性归一化为小数（旧数据可能把 70.39 当作 70.39% 存储）
+    // 2) 「1V1月生产完成率」统一重写为 生产课时/目标课时（与季度/年度聚合一致），
+    //    覆盖原表列可能触发的脏值（自定义%格式/带%号裸值）；任何下游（核心看板趋势图、
+    //    数据库页签等）读取月度周报 v1MonthRate 都得到同一派生口径，形成单一数据源闭环。
+    return result.map(r => {
+      r = normalizeWeeklyValues(r);
+      const prod = r.values.v1MonthProduced, tgt = r.values.v1MonthTarget;
+      if (prod != null && tgt != null && tgt !== 0) {
+        r.values.v1MonthRate = prod / tgt;
+      }
+      return r;
+    });
   }
 
   // 比例字段防御性归一化：统一存为小数(0–1)。旧数据/异常原表可能把 70.39 当 70.39% 存储。
@@ -59,80 +70,6 @@
     return rec;
   }
 
-  // 取某条周报的「原表事项」行；优先用解析时忠实保留的 rows，
-  // 旧记录/示例数据无 rows 时，按 weeklyFields 从 values 回退合成（保证可对比）。
-  function recToRows(rec) {
-    if (rec.rows && rec.rows.length) return rec.rows;
-    const v = rec.values || {};
-    return CA.SCHEMA.weeklyFields.filter(f => v[f.key] != null).map(f => {
-      const isBi = f.unit === '比';                       // 倍数（如单科比 1.8）不当百分数
-      const isPct = f.type === 'ratio' && !isBi;
-      const raw = v[f.key];
-      const base = (typeof raw === 'number') ? raw : CA.parser.toNum(raw);
-      let num, text;
-      if (isPct) {
-        // 归一为小数（兼容旧数据可能直接存了百分数）；text 显示百分数，num 为百分数供图表
-        const pn = normalizeRatio(f.key, base);
-        num = (pn != null) ? pn * 100 : null;
-        text = (pn != null) ? (pn * 100).toFixed(1) + '%' : (raw == null ? '' : String(raw));
-      } else {
-        num = base; text = (raw == null ? '' : String(raw));
-      }
-      return { label: f.label, raw: text, num: num, isPct: isPct, text: text };
-    });
-  }
-
-  // 横向对比表构造器（忠实原表）：按列顺序取并集标签，逐行对齐；
-  // 某列未出现的项 → 该单元格留空（null），渲染时显示空白。
-  function buildCompareRaw(columns, recMap) {
-    const seen = new Set();
-    const order = [];
-    columns.forEach(c => {
-      const rec = recMap[c.key];
-      const rows = rec ? recToRows(rec) : [];
-      rows.forEach(r => {
-        const lab = String(r.label).trim();
-        if (lab && !seen.has(lab)) { seen.add(lab); order.push(lab); }
-      });
-    });
-    const table = order.map(lab => {
-      const cells = columns.map(c => {
-        const rec = recMap[c.key];
-        if (!rec) return null;
-        const hit = recToRows(rec).find(r => String(r.label).trim() === lab);
-        return hit ? { num: hit.num, text: hit.text, isPct: !!hit.isPct } : null;
-      });
-      return { key: lab, label: lab, isPct: cells.some(c => c && c.isPct), values: cells };
-    });
-    return { columns, rows: table };
-  }
-
-  // 月度对比：某年某月各周横向
-  function compareMonthly(weeklyRecs, year, month) {
-    const recs = weeklyRecs.filter(r => r.year === year && r.month === month)
-      .sort((a, b) => a.week - b.week);
-    const columns = recs.map(r => ({ key: r.week, label: '第' + r.week + '周' }));
-    const recMap = {}; recs.forEach(r => recMap[r.week] = r);
-    return buildCompareRaw(columns, recMap);
-  }
-
-  // 季度对比：某年某季各月月度周报横向
-  function compareQuarter(weeklyRecs, year, quarter) {
-    const months = [1, 2, 3].map(m => (quarter - 1) * 3 + m);
-    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year && months.includes(r.month));
-    const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
-    const recMap = {}; me.forEach(r => recMap[r.month] = r);
-    return buildCompareRaw(columns, recMap);
-  }
-
-  // 年度对比：某年各月月度周报横向
-  function compareYear(weeklyRecs, year) {
-    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
-    const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
-    const recMap = {}; me.forEach(r => recMap[r.month] = r);
-    return buildCompareRaw(columns, recMap);
-  }
-
   // 年度对比（标准字段模式）：只显示《季度数据统计标准》中列出的月度原数据字段，
   // 并保持与 QUARTERLY_RULES 一致的顺序，便于与季度汇总口径对齐。
   function compareYearStandard(weeklyRecs, year) {
@@ -144,13 +81,9 @@
       const cells = columns.map(c => {
         const rec = recMap[c.key];
         if (!rec) return null;
-        // 月度「1V1月生产完成率」不读原表列（原表该列填法易触发解析错位），
-        // 改为与季度/年度一致的派生口径：生产课时 / 目标课时；缺失时回退原表列。
-        let rawVal = rec.values[rule.key];
-        if (rule.key === 'v1MonthRate') {
-          const prod = rec.values.v1MonthProduced, tgt = rec.values.v1MonthTarget;
-          if (prod != null && tgt) rawVal = prod / tgt;
-        }
+        // 各字段统一取自月度周报（rec.values）。v1MonthRate 已在 monthEndWeeklies 统一
+        // 派生为 生产课时/目标课时，与季度/年度聚合一致；原表列脏值被覆盖，无需特判。
+        const rawVal = rec.values[rule.key];
         if (rawVal == null) return null;
         const val = normalizeRatio(rule.key, rawVal);
         const isRatio = f && f.type === 'ratio';
@@ -488,7 +421,7 @@
   }
 
   CA.aggregate = {
-    withMonthEnd, monthEndWeeklies, compareMonthly, compareQuarter, compareYear, compareYearStandard, recToRows, buildCompareRaw,
+    withMonthEnd, monthEndWeeklies, compareYearStandard,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate, quarterOptions, evalExpr, normalizeRatio,
     YEARLY_RULES, yearlyAggregate,

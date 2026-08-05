@@ -1,6 +1,7 @@
 /*
  * app.js — UI 控制器
- * 三大板块（最佳科组/教师KPI/周报解析）+ 数据源（数据库视图：年度各月对比）+ 核心看板（含年度/季度/五项满意度）+ 模板中心 + 数据备份
+ * 板块：最佳科组 / 教师KPI / 数据源（历史周报批量入库 + 数据库视图：年度各月对比）/ 核心看板（年度·季度·五项满意度）/ 模板中心 / 数据备份
+ * 数据链路：所有汇总数据统一由 CA.aggregate 聚合层从 store 的月度周报派生，UI 不散算。
  */
 (function (global) {
   'use strict';
@@ -440,55 +441,6 @@
     if (f && f.type === 'ratio' && f.unit === '比') return fmt(val, 2);
     if (f && f.type === 'ratio') return pct(val);
     return fmt(val);
-  }
-
-  // —— 季度汇总（按《季度数据统计标准》）—— 已并入「数据源」的「季度汇总」对比类型
-
-  function renderQuarterTable(year, quarter, target) {
-    const el = $(target || '#cmpResult');
-    const recs = STORE.list('weekly');
-    const g = AGG.quarterlyAggregate(recs).find(x => x.year === year && x.quarter === quarter);
-    if (!g) { el.innerHTML = '<div class="empty">该季度暂无数据（需先有该季各月月度周报）。</div>'; return; }
-    const v = g.values;
-    const heroes = [
-      heroStat('季度1V1生产课时', fmt(v.v1MonthProduced), null, false),
-      heroStat('季度课时生产总现金', fmt(v.monthCashTotal), null, false),
-      heroStat('季度生产完成率', pct(v.v1MonthRate), null, true),
-      heroStat('季度1V1续费人数', fmt(v.xfMonthNum), null, false),
-    ];
-    let html = '<div class="stat-grid">' + heroes.join('') + '</div>';
-    let note = '数据来源：' + year + '年 ' + g.sourceMonths.map(m => m + '月').join('、') + ' 月度周报。';
-    if (g.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + g.missingMonths.map(m => m + '月').join('、') + ' 月度周报，当前按现有月汇总，结果可能不完整。</span>';
-    html += '<div class="preview-note">' + note + '</div>';
-    html += '<div class="table-wrap"><table><thead><tr><th>季度数据（名称）</th><th class="num">季度数据值</th><th>季度数据填写标准</th></tr></thead><tbody>';
-    AGG.QUARTERLY_RULES.forEach(r => {
-      html += '<tr><td><div class="q-name">' + esc(r.label) + '</div><div class="q-src">月度原数据：' + esc(r.src) + '</div></td><td class="num">' + fmtQ(r.key, v[r.key]) + '</td>' +
-        '<td style="color:#71717a;font-size:12.5px">' + esc(r.ruleText) + '</td></tr>';
-    });
-    html += '</tbody></table></div>';
-    html += '<div class="preview-note">说明：依你最新标准——<span class="ok">续/推/结/退各率、停课率、骨干/双三占比、现金均价、停课/骨干/双三人数、月人均效能值</span>均为<b>三个月平均</b>；仅<b>生产完成率、课时生产总现金、金额占比、离职人数率</b>四项仍按原表公式（=C…）计算。第一列「季度数据（名称）」取自标准表第二列，下方小字为第一列对应的月度原表名称。</div>';
-    el.innerHTML = html;
-  }
-
-  function exportQuarterXLSX(year, quarter) {
-    const g = AGG.quarterlyAggregate(STORE.list('weekly')).find(x => x.year === year && x.quarter === quarter);
-    if (!g) { toast('该季度暂无数据'); return; }
-    const v = g.values;
-    const aoa = [['季度数据（名称）', '季度数据值', '月度原数据对应', '季度数据填写标准']];
-    AGG.QUARTERLY_RULES.forEach(r => {
-      let cv = v[r.key];
-      if (cv != null) {
-        const f = SCHEMA.weeklyFields.find(x => x.key === r.key);
-        if (f && f.type === 'ratio' && f.unit !== '比') cv = (cv * 100).toFixed(2) + '%';
-        else if (f && f.type === 'ratio' && f.unit === '比') cv = +cv.toFixed(2);
-      }
-      aoa.push([r.label, cv == null ? '' : cv, r.src, r.ruleText]);
-    });
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '数据统计表');
-    XLSX.writeFile(wb, '季度数据汇总_' + year + 'Q' + quarter + '.xlsx');
-    toast('已导出 ' + year + 'Q' + quarter + ' 季度汇总');
   }
 
   // —— 核心数据看板 ——
