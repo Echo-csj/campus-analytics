@@ -143,8 +143,16 @@
       const f = CA.SCHEMA.weeklyFields.find(x => x.key === rule.key);
       const cells = columns.map(c => {
         const rec = recMap[c.key];
-        if (!rec || rec.values[rule.key] == null) return null;
-        const val = normalizeRatio(rule.key, rec.values[rule.key]);
+        if (!rec) return null;
+        // 月度「1V1月生产完成率」不读原表列（原表该列填法易触发解析错位），
+        // 改为与季度/年度一致的派生口径：生产课时 / 目标课时；缺失时回退原表列。
+        let rawVal = rec.values[rule.key];
+        if (rule.key === 'v1MonthRate') {
+          const prod = rec.values.v1MonthProduced, tgt = rec.values.v1MonthTarget;
+          if (prod != null && tgt) rawVal = prod / tgt;
+        }
+        if (rawVal == null) return null;
+        const val = normalizeRatio(rule.key, rawVal);
         const isRatio = f && f.type === 'ratio';
         const isBi = f && f.unit === '比';
         let num, text;
