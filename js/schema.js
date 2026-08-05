@@ -35,11 +35,11 @@
     { key: 'v1WeekTarget', label: '1V1周目标课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v1WeekProduced', label: '1v1周生产课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v6WeekProduced', label: '1v6周生产课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v1WeekRate', label: '1V1周生产完成率', group: '课时生产', unit: '率', type: 'ratio' },
+    { key: 'v1WeekRate', label: '1V1周生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'v1MonthTarget', label: '1V1月目标课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v1MonthProduced', label: '1v1月生产课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v6MonthProduced', label: '1v6月生产课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v1MonthRate', label: '1V1月生产完成率', group: '课时生产', unit: '率', type: 'ratio' },
+    { key: 'v1MonthRate', label: '1V1月生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'schoolWeekAvg', label: '校周均课时', group: '课时生产', unit: '课时', type: 'num' },
     // 现金
     { key: 'v1WeekCash', label: '1v1周课时生产现金', group: '现金', unit: '元', type: 'num' },

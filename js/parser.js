@@ -73,11 +73,22 @@
             // 入库 values：比例类字段统一存为小数(0–1)
             let storeVal = (f && f.type === 'text') ? (val == null ? '' : String(val)) : num;
             if (f && f.type === 'ratio' && f.unit !== '比') {
-              if (fmtHasPct && typeof num === 'number' && num <= 1) {
-                // 自定义百分比格式（显示带%但底层值≤1）：按格式化文本（含%）解析后÷100
-                const pn = toNum(fmtCell);
-                if (pn != null) storeVal = pn / 100;
-              } else if (isPct || (typeof storeVal === 'number' && storeVal > 1)) {
+              const fmtNum = fmtHasPct ? toNum(fmtCell) : null;
+              if (fmtHasPct && fmtNum != null && typeof num === 'number') {
+                // 有 % 单元格格式：区分标准百分比格式（raw 已是小数）与自定义百分比格式（raw=显示值）
+                // 标准格式：raw=0.78 显示 78%；raw=1.4 显示 140% → fmtNum ≈ num*100
+                // 自定义格式：raw=0.78 显示 0.78% → fmtNum ≈ num
+                if (Math.abs(fmtNum - num * 100) < 1e-6) {
+                  storeVal = num; // 标准百分比格式，保持 raw 小数
+                } else {
+                  storeVal = fmtNum / 100; // 自定义百分比格式，按显示值÷100
+                }
+              } else if (isPct) {
+                // 文本带 % 号（无单元格格式）
+                storeVal = toNum(fmtCell || rawStr) / 100;
+              } else if (typeof storeVal === 'number' && storeVal > 1 && !f.canExceed100) {
+                // 无 % 号的普通百分数字段，值>1 视为整数百分数（如 70 → 70%）
+                // 完成率字段（canExceed100）可>100%，值>1 视为完成倍数（如 1.4 → 140%），不÷100
                 storeVal = storeVal / 100;
               }
             }
@@ -145,13 +156,20 @@
                 const fmtHasPct = /[%％]/.test(fmtStr);
                 let v = (raw == null ? null : (typeof raw === 'number' ? raw : (key === 'subjectGroup' ? String(raw) : toNum(raw))));
                 const fdef = fieldDef(key);
-                // 比例类字段：自定义%格式(显示带%且底层≤1)按格式化文本÷100；否则带「%」号或 >1 时按百分数归一为小数；
-                // 「比」类保持原值
+                // 比例类字段：带 % 单元格格式时区分标准/自定义百分比；
+                // 否则带「%」号或普通百分数字段>1 时按百分数归一为小数；
+                // 完成率字段（canExceed100）可>100%，值>1 视为完成倍数，不÷100；「比」类保持原值
                 if (fdef && fdef.type === 'ratio' && fdef.unit !== '比') {
-                  if (fmtHasPct && typeof v === 'number' && v <= 1) {
-                    const pn = toNum(fmtStr);
-                    if (pn != null) v = pn / 100;
-                  } else if (rawHasPct || (typeof v === 'number' && v > 1)) {
+                  const fmtNum = fmtHasPct ? toNum(fmtStr) : null;
+                  if (fmtHasPct && fmtNum != null && typeof v === 'number') {
+                    if (Math.abs(fmtNum - v * 100) < 1e-6) {
+                      v = v; // 标准百分比格式，保持 raw 小数
+                    } else {
+                      v = fmtNum / 100; // 自定义百分比格式
+                    }
+                  } else if (rawHasPct) {
+                    v = toNum(fmtStr || rawStr) / 100;
+                  } else if (typeof v === 'number' && v > 1 && !fdef.canExceed100) {
                     v = v / 100;
                   }
                 }

@@ -45,17 +45,26 @@
       r = normalizeWeeklyValues(r);
       const prod = r.values.v1MonthProduced, tgt = r.values.v1MonthTarget;
       if (prod != null && tgt != null && tgt !== 0) {
+        // 优先用 生产课时/目标课时 派生，与季度/年度聚合口径统一
         r.values.v1MonthRate = prod / tgt;
+      } else {
+        // 派生失败：回退修复已被错误缩小100倍的旧数据（完成率极少低于5%）
+        const rate = r.values.v1MonthRate;
+        if (typeof rate === 'number' && rate > 0 && rate < 0.05) {
+          r.values.v1MonthRate = rate * 100;
+        }
       }
       return r;
     });
   }
 
   // 比例字段防御性归一化：统一存为小数(0–1)。旧数据/异常原表可能把 70.39 当 70.39% 存储。
+  // 完成率字段（canExceed100）可>100%，值>1 表示完成倍数（如 1.4 → 140%），不做 ÷100。
   function normalizeRatio(key, val) {
     if (val == null || typeof val !== 'number' || !isFinite(val)) return val;
     const f = CA.SCHEMA.weeklyFields.find(x => x.key === key);
     if (!f || f.type !== 'ratio' || f.unit === '比') return val;
+    if (f.canExceed100) return val;
     return val > 1 ? val / 100 : val;
   }
 
@@ -314,6 +323,13 @@
           }
         });
       }
+      // 生产完成率：仅基于同时有生产课时与目标课时的月份，避免缺失目标拉偏结果
+      const validRateMonthsQ = g.months.filter(r => r.values.v1MonthProduced != null && r.values.v1MonthTarget != null);
+      if (validRateMonthsQ.length) {
+        const sumProd = validRateMonthsQ.reduce((s, r) => s + r.values.v1MonthProduced, 0);
+        const sumTgt = validRateMonthsQ.reduce((s, r) => s + r.values.v1MonthTarget, 0);
+        if (sumTgt) qv.v1MonthRate = sumProd / sumTgt;
+      }
       g.values = qv;
       // 缺失的月份（季内应有的 3 个月中，没有月度周报的）
       const expected = [1, 2, 3].map(m => (g.quarter - 1) * 3 + m);
@@ -414,6 +430,13 @@
           if (v != null) { yv[rule.key] = v; changed = true; }
         }
       });
+    }
+    // 年度生产完成率：仅基于同时有生产课时与目标课时的月份，避免缺失目标拉偏结果
+    const validRateMonthsY = months.filter(r => r.values.v1MonthProduced != null && r.values.v1MonthTarget != null);
+    if (validRateMonthsY.length) {
+      const sumProd = validRateMonthsY.reduce((s, r) => s + r.values.v1MonthProduced, 0);
+      const sumTgt = validRateMonthsY.reduce((s, r) => s + r.values.v1MonthTarget, 0);
+      if (sumTgt) yv.v1MonthRate = sumProd / sumTgt;
     }
     const expected = Array.from({ length: 12 }, (_, i) => i + 1);
     const missingMonths = expected.filter(m => !months.some(r => r.month === m));
