@@ -11,12 +11,13 @@
   const CA = global.CA || (global.CA = {});
 
   // 标注每条周报是否为月度周报
+  // 注意：克隆 values，避免下游归一化/派生改写原始 store 记录（保持派生层为纯函数）
   function withMonthEnd(recs) {
     return recs.map(r => {
       const w = r.values && r.values.weekSeq;
       const t = r.values && r.values.totalWeeksOfMonth;
       const isME = (w != null && t != null) ? (w === t) : false;
-      return Object.assign({}, r, { isMonthEnd: isME });
+      return Object.assign({}, r, { isMonthEnd: isME, values: Object.assign({}, r.values) });
     });
   }
 
@@ -339,14 +340,6 @@
     }).sort((a, b) => (b.year - a.year) || (b.quarter - a.quarter));
   }
 
-  // 可选季度（年-季）列表
-  function quarterOptions(weeklyRecs) {
-    const me = monthEndWeeklies(weeklyRecs);
-    const set = new Set();
-    me.forEach(r => set.add(r.year + '-' + (Math.floor((r.month - 1) / 3) + 1)));
-    return [...set].sort().reverse().map(s => { const [y, q] = s.split('-'); return { year: +y, quarter: +q }; });
-  }
-
   // —— 年度汇总（依据《年度数据统计标准·数据统计表》）——
   // 规则与季度标准一致，仅 label 前缀改为「年度」、ruleText 改为「当年」口径。
   //   last = 当年最后一个月的数据
@@ -446,7 +439,7 @@
   CA.aggregate = {
     withMonthEnd, monthEndWeeklies, compareYearStandard,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
-    QUARTERLY_RULES, quarterlyAggregate, quarterOptions, evalExpr, normalizeRatio,
+    QUARTERLY_RULES, quarterlyAggregate, evalExpr, normalizeRatio,
     YEARLY_RULES, yearlyAggregate,
   };
 

@@ -125,10 +125,6 @@
     const rows = data.map(r => [r.year, r.month].concat(SCHEMA.satisfactionItems.map(it => r[it.key] != null ? +(r[it.key] * 100).toFixed(2) : '')));
     exportSheets('核心看板_五项满意度.xlsx', [{ name: '五项满意度', header, rows }]);
   }
-  function parseFileWeek(name) {
-    const m = String(name).match(/第\s*(\d+)\s*周/);
-    return m ? parseInt(m[1], 10) : 4;
-  }
   // 自动推断归属周期：报告针对「刚结束的那一周」——取本周日之前最近的一个周日（今天就是周日则用今天）
   function inferPeriod() {
     const now = new Date();

@@ -151,10 +151,6 @@
     { key: 'progressRate', label: '周进步率', type: 'ratio', desc: '可选；半年度取季度考进步率' },
   ];
 
-  // 分组顺序（用于周报展示）
-  const weeklyGroups = ['基础信息', '人力', '学员', '课时生产', '现金', '效能', '饱和度协校',
-    '续费', '推荐', '结课', '退费', '停课请假入职'];
-
   // 标签 → 字段 反查表（一键提取用）
   const weeklyLabelMap = {};
   weeklyFields.forEach(f => { weeklyLabelMap[f.label] = f; });
@@ -170,7 +166,7 @@
   });
 
   CA.SCHEMA = {
-    weeklyFields, weeklyGroups, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
+    weeklyFields, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
     kezuFields, kpiFields,
     streams: ['weekly', 'kezu', 'kpi'],
   };

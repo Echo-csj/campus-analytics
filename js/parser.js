@@ -161,17 +161,14 @@
                 // 完成率字段（canExceed100）可>100%，值>1 视为完成倍数，不÷100；「比」类保持原值
                 if (fdef && fdef.type === 'ratio' && fdef.unit !== '比') {
                   const fmtNum = fmtHasPct ? toNum(fmtStr) : null;
-                  if (fmtHasPct && fmtNum != null && typeof v === 'number') {
-                    if (Math.abs(fmtNum - v * 100) < 1e-6) {
-                      v = v; // 标准百分比格式，保持 raw 小数
-                    } else {
-                      v = fmtNum / 100; // 自定义百分比格式
-                    }
+                  if (fmtHasPct && fmtNum != null && typeof v === 'number' && Math.abs(fmtNum - v * 100) >= 1e-6) {
+                    v = fmtNum / 100; // 自定义百分比格式（raw=显示值），按显示值÷100
                   } else if (rawHasPct) {
                     v = toNum(fmtStr || rawStr) / 100;
                   } else if (typeof v === 'number' && v > 1 && !fdef.canExceed100) {
                     v = v / 100;
                   }
+                  // 标准百分比格式：Math.abs(fmtNum - v*100) < 1e-6 时 raw 已是小数，保持 v 不变
                 }
                 vals[key] = v;
               } else if (h) {
