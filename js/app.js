@@ -334,6 +334,89 @@
     exportSheets('最佳科组_标准化数据.xlsx', [{ name: '标准化数据', header, rows }]);
   }
 
+  // —— 最佳科组 · 评比结果呈现（Sheet3 全年汇总透视 / Sheet4 季度考试数据 / Sheet5 最佳科组评比汇总）——
+  const RATE_COL = /^(结课率|停课率|退费率|续费率|离职率|合格率|优秀率|进步率)$/;
+  function isNum(v) { return typeof v === 'number' || (typeof v === 'string' && v.trim() !== '' && /^[-\d.]+$/.test(v.trim()) && !isNaN(+v)); }
+  function scoreCell(v, header) {
+    if (v == null || v === '') return '';
+    if (typeof v === 'number') { if (RATE_COL.test(header) && v > 0 && v <= 1) return pct(v); return fmt(v); }
+    const s = String(v).trim();
+    if (isNum(s)) { const n = +s; if (RATE_COL.test(header) && n > 0 && n <= 1) return pct(n); return fmt(n); }
+    return esc(s);
+  }
+  // 通用块表格；rank=true 时按唯一「总分」列降序并标记最佳科组
+  function kezuScoreBlockHTML(block, rank) {
+    const header = block.header || [];
+    if (!header.length) return '';
+    let rows = block.rows.map(r => header.map((_, i) => (i < r.length ? r[i] : null)));
+    let totalIdx = -1;
+    if (rank) {
+      const tot = header.map((h, i) => (/总分/.test(h) ? i : -1)).filter(i => i >= 0);
+      if (tot.length === 1 && !header.some(h => /名次/.test(h))) totalIdx = tot[0];
+    }
+    if (totalIdx >= 0) {
+      const sc = row => { const v = row[totalIdx]; return isNum(v) ? +v : -Infinity; };
+      rows = rows.slice().sort((a, b) => sc(b) - sc(a));
+    }
+    let h = '<div class="table-wrap"><table><thead><tr>';
+    header.forEach((hd, i) => h += '<th class="' + (i === 0 ? '' : 'num') + '">' + esc(hd) + '</th>');
+    h += '</tr></thead><tbody>';
+    rows.forEach((row, ri) => {
+      const win = totalIdx >= 0 && ri === 0 && isNum(row[totalIdx]);
+      h += '<tr' + (win ? ' class="winner"' : '') + '>';
+      row.forEach((v, i) => {
+        if (i === 0) h += '<td>' + (win ? '<span class="badge-best">最佳</span> ' : '') + esc(v == null ? '' : v) + '</td>';
+        else h += '<td class="num">' + scoreCell(v, header[i]) + '</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    return h;
+  }
+  function kezuBestBanner(rating) {
+    if (!rating || !rating.blocks) return '';
+    const blk = rating.blocks.find(b => b.header && b.header[0] === '科组' && b.header.some(h => /全年总分/.test(h)));
+    if (!blk || !blk.rows.length) return '';
+    const tIdx = blk.header.findIndex(h => /全年总分/.test(h));
+    const rIdx = blk.header.findIndex(h => /全年名次/.test(h));
+    let best = null;
+    blk.rows.forEach(r => { const v = r[tIdx]; if (isNum(v)) { if (!best || +v > best.score) best = { name: r[0], score: +v, rank: rIdx >= 0 ? r[rIdx] : '' }; } });
+    if (!best) return '';
+    return '<div class="bk-best-banner"><span class="badge-best">年度最佳科组</span> <b>' + esc(best.name) + '</b>　全年总分 ' + fmt(best.score) + (best.rank !== '' && best.rank != null ? '　名次 ' + esc(best.rank) : '') + '</div>';
+  }
+  function kezuScoreHTML(score) {
+    if (!score || (!score.pivot && !score.exam && !score.rating)) return '';
+    const hasData = (score.pivot && score.pivot.blocks.some(b => b.rows.length)) ||
+      (score.exam && score.exam.blocks.some(b => b.rows.length)) ||
+      (score.rating && score.rating.blocks.some(b => b.rows.length));
+    if (!hasData) return '<div class="panel"><div class="panel-title">最佳科组 · 比照分析</div><div class="empty">已识别评比相关表，但当前上传文件中这些表暂无可呈现的数据行（如 Q3/Q4 季度考试与评分多为预留空行）。上传含完整数据的全量文件即可查看。</div></div>';
+    let h = '<div class="panel"><div class="panel-title">最佳科组 · 比照分析（汇总透视 / 季度考试 / 评比排名）</div>';
+    h += '<div class="panel-desc">以下数据来自上传文件中的『全年汇总透视』『季度考试数据』『最佳科组评比汇总』三张表，原样呈现；含「总分」的评分表按总分降序并标记最佳科组。</div>';
+    const banner = kezuBestBanner(score.rating);
+    if (banner) h += banner;
+    if (score.pivot) {
+      h += '<div class="section-h">全年汇总透视</div>';
+      score.pivot.blocks.forEach(b => { h += '<div class="sub-h">' + esc(b.title || '') + '</div>'; h += b.rows.length ? kezuScoreBlockHTML(b, false) : '<div class="preview-note">（无数据）</div>'; });
+    }
+    if (score.exam) {
+      h += '<div class="section-h">季度考试数据</div>';
+      score.exam.blocks.forEach(b => { h += '<div class="sub-h">' + esc(b.title || '') + '</div>'; h += b.rows.length ? kezuScoreBlockHTML(b, false) : '<div class="preview-note">（该季度暂无考试数据）</div>'; });
+    }
+    if (score.rating) {
+      h += '<div class="section-h">最佳科组评比汇总（评分明细 / 排名）</div>';
+      score.rating.blocks.forEach(b => {
+        const canRank = b.header.filter(hh => /总分/.test(hh)).length === 1 && !b.header.some(hh => /名次/.test(hh));
+        const totCol = b.header.findIndex(hh => /总分/.test(hh));
+        const usable = totCol >= 0 && b.rows.some(r => isNum(r[totCol]) && +r[totCol] > 0);
+        h += '<div class="sub-h">' + esc(b.title || '') + '</div>';
+        if (!b.rows.length || !usable) h += '<div class="preview-note">（该季度/年度暂无评分数据）</div>';
+        else h += kezuScoreBlockHTML(b, canRank);
+      });
+    }
+    h += '</div>';
+    return h;
+  }
+
   function wireBestKezuUpload() {
     const drop = $('#bk_drop'), fileInput = $('#bk_file');
     if (!drop) return;
@@ -383,6 +466,13 @@
       return;
     }
     html += '<div class="preview-note">已生成 <b>' + records.length + '</b> 条标准化记录（科组 × 月）</div>';
+    if (res.score && (res.score.pivot || res.score.exam || res.score.rating)) {
+      const parts = [];
+      if (res.score.pivot) parts.push('全年汇总透视');
+      if (res.score.exam) parts.push('季度考试数据');
+      if (res.score.rating) parts.push('最佳科组评比汇总');
+      html += '<div class="preview-note">同时识别到评比相关表：<b>' + parts.join('、') + '</b>，确认后将一并入库并在下方呈现排名。</div>';
+    }
     html += kezuTableHTML(records);
     html += '<div class="row" style="margin-top:14px">';
     html += '<button class="btn primary" id="bk_confirm"' + (errors.length ? ' disabled' : '') + '>确认入库（' + records.length + ' 条）</button>';
@@ -397,7 +487,12 @@
           STORE.upsert({ stream: 'bestkezu', year: r.year, month: r.month, week: 0, dimension: r.subject, values: kezuStoredValues(r), importedAt: Date.now() });
           n++;
         });
-        toast(n + ' 条已入库');
+        const yv = (($('#bk_year') && $('#bk_year').value) || '').trim();
+        const sy = /^\d{4}$/.test(yv) ? +yv : 2026;
+        if (res.score && (res.score.pivot || res.score.exam || res.score.rating)) {
+          STORE.upsert({ stream: 'bestkezu_score', year: sy, month: 0, week: 0, dimension: 'score', values: res.score, importedAt: Date.now() });
+        }
+        toast(n + ' 条已入库' + (res.score ? '，评比数据已同步' : ''));
         renderKezu();
       });
     }
@@ -410,7 +505,7 @@
     let html = `
       <div class="panel">
         <div class="panel-title">上传并一键解析 · 最佳科组月度数据</div>
-        <div class="panel-desc">支持 Excel / CSV。自动识别「长表（科组×月一行）」或「宽表（科组×月×指标）」，按表头模糊匹配字段，统一重算周平均与各率，并给出校验提示。</div>
+        <div class="panel-desc">支持 Excel / CSV。自动识别「长表（科组×月一行）」或「宽表（科组×月×指标）」，按表头模糊匹配字段，统一重算周平均与各率，并给出校验提示。若上传含『全年汇总透视』『季度考试数据』『最佳科组评比汇总』三张表的全量文件，还会自动呈现科组评比结果与排名。</div>
         <div class="upload-bar" id="bk_drop">
           <div class="ub-left">
             <div class="ub-ico" id="bk_ubico">${UPLOAD_SVG}</div>
@@ -441,6 +536,12 @@
     } else {
       html += '<div class="panel"><div class="empty">还没有最佳科组数据。上传「泉山2026最佳科组_全年汇总」这类文件，系统会自动解析为标准格式。</div></div>';
     }
+    // 评比结果面板（来自上传文件中的 Sheet3/4/5）
+    const scoreRecs = STORE.list('bestkezu_score');
+    const curYear = stored.length ? [...new Set(stored.map(r => r.year))].sort((a, b) => b - a)[0] : null;
+    const scoreRec = (curYear != null && scoreRecs.find(r => r.year === curYear)) || scoreRecs[0];
+    const score = scoreRec ? scoreRec.values : null;
+    html += kezuScoreHTML(score);
     $('#content').innerHTML = html;
 
     if (stored.length) {
@@ -455,9 +556,10 @@
       $('#bk_year_sel').addEventListener('change', e => fill(+e.target.value));
       $('#bk_export').addEventListener('click', () => exportBestKezu(stored));
       $('#bk_clear').addEventListener('click', () => {
-        if (window.confirm('确认清空所有最佳科组数据？此操作不可撤销。')) {
+        if (window.confirm('确认清空所有最佳科组数据（含评比结果）？此操作不可撤销。')) {
           stored.forEach(r => STORE.remove('bestkezu', r.year, r.month, 0, r.subject));
-          toast('已清空本科组数据');
+          scoreRecs.forEach(r => STORE.remove('bestkezu_score', r.year, 0, 0, 'score'));
+          toast('已清空本科组及评比数据');
           renderKezu();
         }
       });

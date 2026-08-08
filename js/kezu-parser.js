@@ -249,6 +249,76 @@
     return { errors, warnings };
   }
 
+  // —— 评比相关 sheet 解析（Sheet3 全年汇总透视 / Sheet4 季度考试数据 / Sheet5 最佳科组评比汇总）——
+  // 这些表是源文件中已计算好的派生/评比视图，工作台原样呈现即可（含评分排名）。
+  const SCORE_SHEET_NAMES = ['全年汇总透视', '季度考试数据', '最佳科组评比汇总'];
+
+  function isScoreHeader(row) {
+    if (!row) return false;
+    const cells = row.filter(c => c != null && String(c).trim() !== '');
+    if (cells.length < 3) return false;
+    const f = String(row[0] || '').trim();
+    return ['科组', '月份', '季度', '序号'].indexOf(f) >= 0;
+  }
+  function isScoreTitle(row) {
+    if (!row) return false;
+    const cells = row.map(c => c != null ? String(c).trim() : '').filter(c => c !== '');
+    if (!cells.length) return false;
+    // 整行皆为数字（如预留的全 0 行）→ 视为数据，不是标题
+    if (cells.every(c => /^[-\d.]+$/.test(c))) return false;
+    if (cells.length === 1) return true;
+    if (cells.every(c => c === cells[0])) return true; // 合并单元格展开的整行标题
+    const f = cells[0];
+    if (/^[一二三四五六]、/.test(f)) return true;       // 一、按科组（全年）
+    if (/权重/.test(f)) return true;                    // ▌Q1 （权重：...）
+    if (/^[\s▌]*[Qq]\d/.test(f)) return true;           // Q1（源：...）
+    return false;
+  }
+  // 从一张表的原始行（含空行）中抽取所有「表头 + 数据块」
+  function extractScoreBlocks(rows) {
+    const blocks = [];
+    let i = 0;
+    while (i < rows.length) {
+      const row = rows[i];
+      if (!row || row.every(c => c == null || String(c).trim() === '')) { i++; continue; }
+      if (isScoreHeader(row)) {
+        const header = row.map(c => (c == null ? '' : String(c).trim()));
+        let title = '';
+        for (let t = i - 1; t >= 0; t--) {
+          if (rows[t] && isScoreTitle(rows[t])) { const fc = rows[t].find(c => c != null && String(c).trim() !== ''); title = fc ? String(fc).trim() : ''; break; }
+        }
+        const dataRows = [];
+        let j = i + 1;
+        while (j < rows.length) {
+          const dr = rows[j];
+          if (!dr || dr.every(c => c == null || String(c).trim() === '')) break; // 空行结束本块
+          if (isScoreHeader(dr)) break;  // 下一张表
+          if (isScoreTitle(dr)) break;   // 下一个分区
+          const nonEmpty = dr.filter(c => c != null && String(c).trim() !== '').length;
+          if (nonEmpty <= 1) { j++; continue; } // 跳过仅首格标签（如「合计」占位）
+          dataRows.push(dr.map(c => (c == null ? null : c)));
+          j++;
+        }
+        blocks.push({ title: title || '', header, rows: dataRows });
+        i = j;
+      } else {
+        i++;
+      }
+    }
+    return blocks;
+  }
+  function parseScoreSheets(sheets) {
+    const result = { pivot: null, exam: null, rating: null, consumed: [] };
+    const byName = n => sheets.find(s => s.name === n);
+    const piv = byName('全年汇总透视');
+    const exam = byName('季度考试数据');
+    const rating = byName('最佳科组评比汇总');
+    if (piv) { result.pivot = { name: piv.name, blocks: extractScoreBlocks(piv.rows) }; result.consumed.push(piv.name); }
+    if (exam) { result.exam = { name: exam.name, blocks: extractScoreBlocks(exam.rows) }; result.consumed.push(exam.name); }
+    if (rating) { result.rating = { name: rating.name, blocks: extractScoreBlocks(rating.rows) }; result.consumed.push(rating.name); }
+    return result;
+  }
+
   // —— 主入口（纯函数）——
   function parseMatrix(sheets) {
     const allRecs = [];
@@ -283,11 +353,18 @@
     sheetReports.filter(s => s.status !== 'ok').forEach(s => {
       warnings.push({ msg: '未识别/空 sheet：' + s.name + '（' + ({ empty: '空表', unrecognized: '未能识别为长表或宽表' }[s.status] || s.status) + '）' });
     });
+    // 评比相关 sheet（汇总透视/季度考试/评比汇总）单独解析，抑制其原 unrecognized 警告
+    const score = parseScoreSheets(sheets);
+    const consumed = score.consumed || [];
+    for (let i = warnings.length - 1; i >= 0; i--) {
+      if (consumed.some(n => warnings[i].msg.indexOf(n) >= 0)) warnings.splice(i, 1);
+    }
     return {
       records: allRecs,
       errors, warnings,
       layout: (sheetReports.find(s => s.status === 'ok') || {}).layout || 'unknown',
       sheetReports,
+      score,
     };
   }
 
@@ -314,6 +391,7 @@
 
   CA.BESTKEZU.parseMatrix = parseMatrix;
   CA.BESTKEZU.parseFile = parseFile;
+  CA.BESTKEZU.parseScoreSheets = parseScoreSheets;
   CA.BESTKEZU.toNum = toNum;
   CA.BESTKEZU.matchField = matchField;
 })(typeof window !== 'undefined' ? window : global);
