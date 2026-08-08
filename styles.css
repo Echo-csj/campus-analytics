@@ -175,6 +175,25 @@ td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numer
 .upload-bar .ub-sub { font-size: 12px; color: var(--text-3); margin-top: 1px; }
 .upload-bar .ub-sub b { color: var(--text-2); font-family: var(--mono); }
 .upload-bar.has-file .ub-ico { background: #dcfce7; color: var(--green); }
+.upload-bar .ub-actions { flex-shrink: 0; }
+
+/* 最佳科组 · 工具条 */
+.toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 4px 0 12px; }
+.toolbar label { font-size: 12px; color: var(--text-2); }
+.toolbar select { min-width: 90px; }
+
+/* 最佳科组 · 校验横幅 */
+.bk-validate { margin-top: 14px; }
+.bk-validate > div { border-radius: var(--radius); padding: 11px 13px; font-size: 13px; margin-bottom: 10px; }
+.bk-err { background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+.bk-err b { color: #991b1b; }
+.bk-err ul { margin: 8px 0 0; padding-left: 20px; }
+.bk-err li { margin: 2px 0; }
+.bk-ok { background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+.bk-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92660a; border-radius: var(--radius); padding: 9px 13px; font-size: 12.5px; }
+.bk-warn summary { cursor: pointer; font-weight: 600; color: #a16207; }
+.bk-warn ul { margin: 8px 0 0; padding-left: 20px; }
+.bk-warn li { margin: 2px 0; }
 
 /* 对比中心 · 历史周报批量入库 */
 .upload-card {

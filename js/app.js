@@ -229,37 +229,240 @@
     $('#cancel_' + stream).addEventListener('click', () => { $('#preview_' + stream).innerHTML = ''; pending = null; });
   }
 
-  // —— 最佳科组 ——
-  function renderKezu() {
-    let html = uploadPanelHTML('kezu');
-    const recs = STORE.list('kezu');
-    const monthly = AGG.kezuMonthly(recs);
-    html += '<div class="panel"><div class="panel-title">月度自动汇总（按 年-月-科组）</div>';
-    html += '<div class="panel-desc">周度提单科数/课时/结课/退费/停课/续费/推荐自动累加为月值；周平均 = 月课时 / 月单科数。</div>';
-    if (!monthly.length) html += '<div class="empty">还没有科组周报，先上传「科组周报」。</div>';
-    else {
-      html += '<div class="table-wrap"><table><thead><tr><th>年</th><th>月</th><th>科组</th><th class="num">单科数</th><th class="num">课时</th><th class="num">周平均</th><th class="num">结课单科</th><th class="num">退费单科</th><th class="num">停课单科</th><th class="num">续费单科</th><th class="num">推荐单科</th><th class="num">教师数</th></tr></thead><tbody>';
-      monthly.sort((a, b) => (b.year - a.year) || (b.month - b.month) || a.dimension.localeCompare(b.dimension)).forEach(r => {
-        const v = r.values;
-        html += '<tr><td>' + r.year + '</td><td>' + r.month + '</td><td>' + r.dimension + '</td>' +
-          '<td class="num">' + fmt(v.subjects) + '</td><td class="num">' + fmt(v.hours) + '</td><td class="num">' + fmt(v.weekAvg, 2) + '</td>' +
-          '<td class="num">' + fmt(v.jkSubj) + '</td><td class="num">' + fmt(v.tfSubj) + '</td><td class="num">' + fmt(v.tkSubj) + '</td>' +
-          '<td class="num">' + fmt(v.xfSubj) + '</td><td class="num">' + fmt(v.tjSubj) + '</td><td class="num">' + fmt(v.teacherCount) + '</td></tr>';
+  // —— 最佳科组（月度数据 · 标准化解析）——
+  const BK = CA.BESTKEZU;
+  const UPLOAD_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>';
+
+  // STORE 记录（dimension=subject）→ 扁平 {year,month,subject,...values}
+  function kezuFlat(rec) {
+    return Object.assign({ year: rec.year, month: rec.month, subject: rec.dimension }, rec.values || {});
+  }
+  // 落库时只保留标准化字段
+  function kezuStoredValues(r) {
+    const out = {};
+    ['hours', 'subjects', 'weeks', 'jieke', 'tingke', 'tuifei', 'xufei', 'teachers', 'quit',
+      'weekAvg', 'jiekeRate', 'tingkeRate', 'tuifeiRate', 'xufeiRate', 'quitRate', 'quarter']
+      .forEach(k => { if (r[k] != null) out[k] = r[k]; });
+    return out;
+  }
+
+  // 标准化长表（科组 × 月）
+  function kezuTableHTML(records) {
+    const cols = [
+      { k: 'year', l: '年' }, { k: 'month', l: '月' }, { k: 'subject', l: '科组', s: true },
+      { k: 'hours', l: '课时' }, { k: 'subjects', l: '单科数' }, { k: 'weeks', l: '周数' },
+      { k: 'jieke', l: '结课' }, { k: 'tingke', l: '停课' }, { k: 'tuifei', l: '退费' }, { k: 'xufei', l: '续费' },
+      { k: 'teachers', l: '教师数' }, { k: 'quit', l: '离职' },
+      { k: 'weekAvg', l: '周平均', d: 2 }, { k: 'jiekeRate', l: '结课率', p: 1 }, { k: 'tingkeRate', l: '停课率', p: 1 },
+      { k: 'tuifeiRate', l: '退费率', p: 1 }, { k: 'xufeiRate', l: '续费率', p: 1 }, { k: 'quitRate', l: '离职率', p: 1 },
+      { k: 'quarter', l: '季度' }
+    ];
+    const rs = records.slice().sort((a, b) => (a.year - b.year) || a.subject.localeCompare(b.subject) || (a.month - b.month));
+    let h = '<div class="table-wrap"><table><thead><tr>';
+    cols.forEach(c => h += '<th class="' + (c.s ? '' : 'num') + '">' + c.l + '</th>');
+    h += '</tr></thead><tbody>';
+    rs.forEach(r => {
+      h += '<tr>';
+      cols.forEach(c => {
+        if (c.s) h += '<td>' + esc(r.subject) + '</td>';
+        else if (c.p) h += '<td class="num">' + pct(r[c.k]) + '</td>';
+        else h += '<td class="num">' + fmt(r[c.k], c.d) + '</td>';
       });
-      html += '</tbody></table></div>';
-      // 排名图（按最新月周平均）
-      const latest = monthly.filter(r => r.year === Math.max(...monthly.map(x => x.year)) && r.month === Math.max(...monthly.filter(x => x.year === Math.max(...monthly.map(y => y.year))).map(x => x.month)));
-      if (latest.length) {
-        html += '<div class="section-h">最新月 · 科组周平均排名</div><div class="chart-box"><canvas id="kezuChart"></canvas></div>';
-      }
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  // 科组年度汇总（全年口径）
+  function kezuAnnual(rs) {
+    const bySubj = {};
+    rs.forEach(r => { (bySubj[r.subject] = bySubj[r.subject] || []).push(r); });
+    const out = [];
+    Object.keys(bySubj).forEach(subj => {
+      const g = bySubj[subj];
+      const sum = k => g.reduce((a, r) => a + (r[k] || 0), 0);
+      const n = g.length;
+      const totalHours = sum('hours'), totalWeeks = sum('weeks');
+      const avgSubjects = n ? sum('subjects') / n : 0;
+      const xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
+      const last = g.slice().sort((a, b) => b.month - a.month)[0];
+      const lastTeachers = last.teachers || 0;
+      out.push({
+        subject: subj, totalHours, totalWeeks,
+        avgSubjects: Math.round(avgSubjects * 10) / 10,
+        yearWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
+        xf, jk, tf, tk, qt,
+        xufeiRate: avgSubjects ? xf / avgSubjects : null,
+        jiekeRate: avgSubjects ? jk / avgSubjects : null,
+        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
+        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
+        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
+        teachers: lastTeachers
+      });
+    });
+    return out.sort((a, b) => b.totalHours - a.totalHours);
+  }
+  function kezuAnnualHTML(ann) {
+    const cols = [
+      { l: '科组', s: true }, { l: '全年课时', k: 'totalHours' }, { l: '全年周数', k: 'totalWeeks' },
+      { l: '平均单科数', k: 'avgSubjects', d: 1 }, { l: '年均周平均', k: 'yearWeekAvg', d: 2 },
+      { l: '续费', k: 'xf' }, { l: '结课', k: 'jk' }, { l: '退费', k: 'tf' }, { l: '停课', k: 'tk' }, { l: '离职', k: 'qt' },
+      { l: '续费率', k: 'xufeiRate', p: 1 }, { l: '结课率', k: 'jiekeRate', p: 1 }, { l: '退费率', k: 'tuifeiRate', p: 1 }, { l: '停课率', k: 'tingkeRate', p: 1 }, { l: '离职率', k: 'quitRate', p: 1 },
+      { l: '年末教师数', k: 'teachers' }
+    ];
+    let h = '<div class="table-wrap"><table><thead><tr>';
+    cols.forEach(c => h += '<th class="' + (c.s ? '' : 'num') + '">' + c.l + '</th>');
+    h += '</tr></thead><tbody>';
+    ann.forEach(a => {
+      h += '<tr>';
+      cols.forEach(c => {
+        if (c.s) h += '<td>' + esc(a.subject) + '</td>';
+        else if (c.p) h += '<td class="num">' + pct(a[c.k]) + '</td>';
+        else h += '<td class="num">' + fmt(a[c.k], c.d) + '</td>';
+      });
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+    return h;
+  }
+
+  function exportBestKezu(stored) {
+    const header = ['年份', '月份', '科组', '课时', '单科数', '周数', '结课', '停课', '退费', '续费', '教师数', '离职', '周平均', '结课率', '停课率', '退费率', '续费率', '离职率', '季度'];
+    const keys = ['year', 'month', 'subject', 'hours', 'subjects', 'weeks', 'jieke', 'tingke', 'tuifei', 'xufei', 'teachers', 'quit', 'weekAvg', 'jiekeRate', 'tingkeRate', 'tuifeiRate', 'xufeiRate', 'quitRate', 'quarter'];
+    const rows = stored.slice().sort((a, b) => (a.year - b.year) || a.subject.localeCompare(b.subject) || (a.month - b.month)).map(r => keys.map(k => r[k] == null ? '' : r[k]));
+    exportSheets('最佳科组_标准化数据.xlsx', [{ name: '标准化数据', header, rows }]);
+  }
+
+  function wireBestKezuUpload() {
+    const drop = $('#bk_drop'), fileInput = $('#bk_file');
+    if (!drop) return;
+    drop.addEventListener('click', e => { if (e.target.closest('button')) return; fileInput.click(); });
+    drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('drag'));
+    drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) { markBestKezuFile(f); handleBestKezuFile(f); } });
+    fileInput.addEventListener('change', e => { const f = e.target.files[0]; if (f) { markBestKezuFile(f); handleBestKezuFile(f); } });
+    const btn = $('#bk_parse');
+    if (btn) btn.addEventListener('click', e => { e.stopPropagation(); const f = fileInput.files[0]; if (!f) { toast('请先选择文件'); return; } handleBestKezuFile(f); });
+  }
+  function markBestKezuFile(file) {
+    const lbl = $('#bk_filelabel'), drop = $('#bk_drop');
+    if (drop) drop.classList.add('has-file');
+    if (lbl) lbl.innerHTML = '已选文件：<b>' + esc(file.name) + '</b> · 点击重新选择';
+  }
+  function handleBestKezuFile(file) {
+    const preview = $('#bk_preview');
+    if (!preview) return;
+    preview.innerHTML = '<div class="preview-note">解析中…</div>';
+    BK.parseFile(file).then(res => {
+      const yv = (($('#bk_year') && $('#bk_year').value) || '').trim();
+      if (/^\d{4}$/.test(yv)) res.records.forEach(r => { r.year = +yv; });
+      renderBestKezuPreview(res);
+    }).catch(err => { preview.innerHTML = '<div class="preview-note warn-cell">解析失败：' + esc(err && err.message ? err.message : String(err)) + '</div>'; });
+  }
+  function renderBestKezuPreview(res) {
+    const { records, errors, warnings } = res;
+    let html = '<div class="bk-validate">';
+    if (errors.length) {
+      html += '<div class="bk-err"><b>✕ 校验未通过（' + errors.length + ' 项错误）</b><ul>';
+      errors.slice(0, 30).forEach(e => html += '<li>' + esc(e.msg) + '</li>');
+      if (errors.length > 30) html += '<li>…其余 ' + (errors.length - 30) + ' 项</li>';
+      html += '</ul></div>';
+    } else {
+      html += '<div class="bk-ok">✓ 校验通过，无错误</div>';
+    }
+    if (warnings.length) {
+      html += '<details class="bk-warn"><summary>⚠ 提示（' + warnings.length + ' 项，点击展开）</summary><ul>';
+      warnings.slice(0, 40).forEach(w => html += '<li>' + esc(w.msg) + '</li>');
+      html += '</ul></details>';
     }
     html += '</div>';
-    $('#content').innerHTML = html;
-    wireUpload('kezu');
-    if (monthly.length) {
-      const latest = monthly.filter(r => r.year === Math.max(...monthly.map(x => x.year)) && r.month === Math.max(...monthly.filter(x => x.year === Math.max(...monthly.map(y => y.year))).map(x => x.month)));
-      drawBar('kezuChart', latest.map(r => r.dimension), latest.map(r => +r.values.weekAvg.toFixed(2)), '周平均', 'rgba(79,70,229,.8)');
+    if (!records.length) {
+      html += '<div class="preview-note warn-cell">未解析到有效数据行，请检查表格结构（需含「月份」「科组」列，且每行有课时/单科数等指标）。</div>';
+      $('#bk_preview').innerHTML = html;
+      return;
     }
+    html += '<div class="preview-note">已生成 <b>' + records.length + '</b> 条标准化记录（科组 × 月）</div>';
+    html += kezuTableHTML(records);
+    html += '<div class="row" style="margin-top:14px">';
+    html += '<button class="btn primary" id="bk_confirm"' + (errors.length ? ' disabled' : '') + '>确认入库（' + records.length + ' 条）</button>';
+    if (errors.length) html += '<span class="hint" style="margin-left:10px">存在错误，请修正后重新上传</span>';
+    html += '<button class="btn ghost" id="bk_cancel">取消</button></div>';
+    $('#bk_preview').innerHTML = html;
+    const confirmBtn = $('#bk_confirm');
+    if (confirmBtn && !errors.length) {
+      confirmBtn.addEventListener('click', () => {
+        let n = 0;
+        records.forEach(r => {
+          STORE.upsert({ stream: 'bestkezu', year: r.year, month: r.month, week: 0, dimension: r.subject, values: kezuStoredValues(r), importedAt: Date.now() });
+          n++;
+        });
+        toast(n + ' 条已入库');
+        renderKezu();
+      });
+    }
+    const cancelBtn = $('#bk_cancel');
+    if (cancelBtn) cancelBtn.addEventListener('click', () => { $('#bk_preview').innerHTML = ''; });
+  }
+
+  function renderKezu() {
+    const stored = STORE.list('bestkezu').map(kezuFlat);
+    let html = `
+      <div class="panel">
+        <div class="panel-title">上传并一键解析 · 最佳科组月度数据</div>
+        <div class="panel-desc">支持 Excel / CSV。自动识别「长表（科组×月一行）」或「宽表（科组×月×指标）」，按表头模糊匹配字段，统一重算周平均与各率，并给出校验提示。</div>
+        <div class="upload-bar" id="bk_drop">
+          <div class="ub-left">
+            <div class="ub-ico" id="bk_ubico">${UPLOAD_SVG}</div>
+            <div>
+              <div class="ub-title">拖入或点击上传 xlsx / xls / csv</div>
+              <div class="ub-sub" id="bk_filelabel">未选择文件</div>
+            </div>
+          </div>
+          <div class="ub-actions"><button class="btn primary" id="bk_parse">一键解析</button></div>
+          <input type="file" id="bk_file" accept=".xlsx,.xls,.csv" hidden />
+        </div>
+        <div class="meta-row">
+          <div class="field"><label>年份(覆盖)</label><input type="number" id="bk_year" value="2026" min="2000" max="2100" style="min-width:84px"/><span class="hint">文件无年份时默认 2026；留空则不覆盖</span></div>
+        </div>
+        <div id="bk_preview"></div>
+      </div>`;
+
+    if (stored.length) {
+      const years = [...new Set(stored.map(r => r.year))].sort((a, b) => b - a);
+      const curYear = years[0];
+      html += '<div class="panel"><div class="panel-title">最佳科组 · 标准化数据（共 ' + stored.length + ' 条）</div>';
+      html += '<div class="toolbar"><label>年份</label><select id="bk_year_sel">' + years.map(y => '<option value="' + y + '"' + (y === curYear ? ' selected' : '') + '>' + y + ' 年</option>').join('') + '</select>';
+      html += '<button class="btn ghost" id="bk_export">导出标准化 Excel</button>';
+      html += '<button class="btn ghost" id="bk_clear">清空本科组数据</button></div>';
+      html += '<div class="section-h">月度明细（科组 × 月）</div><div id="bk_monthly_wrap"></div>';
+      html += '<div class="section-h">科组年度汇总（' + curYear + ' 年口径）</div><div id="bk_annual_wrap"></div>';
+      html += '<div class="chart-box"><canvas id="bkAnnualChart"></canvas></div></div>';
+    } else {
+      html += '<div class="panel"><div class="empty">还没有最佳科组数据。上传「泉山2026最佳科组_全年汇总」这类文件，系统会自动解析为标准格式。</div></div>';
+    }
+    $('#content').innerHTML = html;
+
+    if (stored.length) {
+      const fill = (year) => {
+        const rs = stored.filter(r => r.year === year);
+        $('#bk_monthly_wrap').innerHTML = kezuTableHTML(rs);
+        const ann = kezuAnnual(rs);
+        $('#bk_annual_wrap').innerHTML = kezuAnnualHTML(ann);
+        if (ann.length) drawBar('bkAnnualChart', ann.map(a => a.subject), ann.map(a => a.totalHours), '全年课时', 'rgba(79,70,229,.8)');
+      };
+      fill(curYear);
+      $('#bk_year_sel').addEventListener('change', e => fill(+e.target.value));
+      $('#bk_export').addEventListener('click', () => exportBestKezu(stored));
+      $('#bk_clear').addEventListener('click', () => {
+        if (window.confirm('确认清空所有最佳科组数据？此操作不可撤销。')) {
+          stored.forEach(r => STORE.remove('bestkezu', r.year, r.month, 0, r.subject));
+          toast('已清空本科组数据');
+          renderKezu();
+        }
+      });
+    }
+    wireBestKezuUpload();
   }
 
   // —— 教师 KPI ——
@@ -706,21 +909,53 @@
 
   // —— 模板中心 ——
   function renderTemplates() {
+    const BK = CA.BESTKEZU;
     let html = '<div class="panel"><div class="panel-title">模板中心</div>';
-    html += '<div class="panel-desc">科组周报 / 教师周报为「按周独立台账」。你可上传自己的 xlsx（首行表头）覆盖默认列映射；或下载起步模板填数。</div>';
-    ['kezu', 'kpi'].forEach(stream => {
-      const map = TPL.getMapping(stream);
-      const name = stream === 'kezu' ? '科组周报' : '教师周报';
-      html += '<div class="section-h">' + name + ' · 当前映射</div><div class="table-wrap"><table><thead><tr><th>表头</th><th>→ 内部字段</th></tr></thead><tbody>';
-      Object.entries(map.map).forEach(([h, k]) => { html += '<tr><td>' + h + '</td><td><code>' + k + '</code></td></tr>'; });
-      html += '</tbody></table></div>';
-      html += '<div class="row" style="margin:8px 0 4px"><button class="btn sm" data-dl="' + stream + '">下载' + name + '起步模板</button>' +
-        '<label class="btn sm ghost">上传映射表覆盖<input type="file" accept=".xlsx,.xls" data-map="' + stream + '" hidden/></label></div>';
+    html += '<div class="panel-desc">最佳科组为「科组×月标准化月度数据」，固定 19 列字段（含系统派生），表头模糊匹配、各率与周平均由系统统一重算。教师周报仍为「按周独立台账」，可上传映射覆盖或下载起步模板。</div>';
+
+    // —— 最佳科组 标准化字段说明 ——
+    html += '<div class="section-h">最佳科组 · 标准化字段（固定格式）</div>';
+    html += '<div class="panel-desc">下表为系统标准字段，上传文件时按表头自动匹配；带「派生」标记的列无需填写，由系统按口径计算（周平均 / 各率 / 季度）。</div>';
+    html += '<div class="table-wrap"><table><thead><tr><th>字段 key</th><th>中文名</th><th>类型</th><th>说明</th><th>必填</th></tr></thead><tbody>';
+    BK.FIELDS.forEach(f => {
+      html += '<tr><td><code>' + f.key + '</code></td><td>' + f.label + '</td>' +
+        '<td>' + (f.type === 'calc' ? '派生' : (f.type === 'text' ? '文本' : '数值')) + '</td>' +
+        '<td>' + (f.desc || '') + '</td>' +
+        '<td>' + (f.required ? '是' : '—') + '</td></tr>';
     });
+    html += '</tbody></table></div>';
+    html += '<div class="row" style="margin:8px 0 4px"><button class="btn sm" id="bk_dl_tpl">下载最佳科组标准化起步模板</button>' +
+      '<span class="hint" style="margin-left:8px">含 2 行示例（数学1月 / 英语4月），派生列留空由系统计算</span></div>';
+
+    // —— 教师周报（旧式映射）——
+    const map = TPL.getMapping('kpi');
+    html += '<div class="section-h">教师周报 · 当前映射</div><div class="table-wrap"><table><thead><tr><th>表头</th><th>→ 内部字段</th></tr></thead><tbody>';
+    Object.entries(map.map).forEach(([h, k]) => { html += '<tr><td>' + h + '</td><td><code>' + k + '</code></td></tr>'; });
+    html += '</tbody></table></div>';
+    html += '<div class="row" style="margin:8px 0 4px"><button class="btn sm" data-dl="kpi">下载教师周报起步模板</button>' +
+      '<label class="btn sm ghost">上传映射表覆盖<input type="file" accept=".xlsx,.xls" data-map="kpi" hidden/></label></div>';
+
     html += '</div>';
     $('#content').innerHTML = html;
+    const dl = $('#bk_dl_tpl');
+    if (dl) dl.addEventListener('click', downloadBestKezuTemplate);
     $all('[data-dl]').forEach(b => b.addEventListener('click', () => downloadTemplate(b.dataset.dl)));
     $all('[data-map]').forEach(inp => inp.addEventListener('change', e => uploadMapping(inp.dataset.map, e.target.files[0])));
+  }
+
+  function downloadBestKezuTemplate() {
+    const BK = CA.BESTKEZU;
+    const header = BK.FIELDS.map(f => f.label);
+    const sample = [
+      [2026, 1, '数学', 1035, 60, 4, 1, 1, 1, 6, 11, 0, '', '', '', '', '', '', '', ''],
+      [2026, 4, '英语', 825, 42, 5, 0, 0, 2, 9, 10, 1, '', '', '', '', '', '', '', ''],
+    ];
+    const aoa = [header, ...sample];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '标准化模板');
+    XLSX.writeFile(wb, '最佳科组_标准化起步模板.xlsx');
+    toast('已下载模板');
   }
 
   function downloadTemplate(stream) {
@@ -755,12 +990,12 @@
   // —— 数据备份 ——
   function renderData() {
     const all = STORE.readAll();
-    const byStream = { weekly: 0, kezu: 0, kpi: 0 };
+    const byStream = { weekly: 0, bestkezu: 0, kpi: 0 };
     all.forEach(r => byStream[r.stream]++);
     let html = '<div class="panel"><div class="panel-title">数据备份 / 恢复</div>';
     html += '<div class="panel-desc">数据保存在本浏览器 localStorage。导出为 data.json 可备份、跨设备迁移、或历史补录（导入会按主键覆盖）。</div>';
     html += '<div class="kpi-cards"><div class="kpi-card"><div class="k">周报</div><div class="v">' + byStream.weekly + '</div></div>' +
-      '<div class="kpi-card"><div class="k">科组周报</div><div class="v">' + byStream.kezu + '</div></div>' +
+      '<div class="kpi-card"><div class="k">最佳科组</div><div class="v">' + byStream.bestkezu + '</div></div>' +
       '<div class="kpi-card"><div class="k">教师周报</div><div class="v">' + byStream.kpi + '</div></div>' +
       '<div class="kpi-card"><div class="k">合计</div><div class="v">' + all.length + '</div></div></div>';
     html += '<div class="row" style="margin-top:14px"><button class="btn" id="dlData">导出 data.json</button>' +
