@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>文件上传与解析模块</title>
+<script src="vendor/xlsx.full.min.js"></script>
+<script>if (typeof XLSX === 'undefined') { document.write('<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"><\/script>'); }</script>
+<style>
+  :root {
+    --bg: #ffffff; --fg: #18181b; --muted: #71717a; --line: #e4e4e7;
+    --indigo: #4F46E5; --indigo-weak: #eef2ff; --green: #16a34a; --amber: #d97706; --red: #dc2626;
+    --radius: 10px; --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--sans); -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 40px 24px 80px; }
+  h1 { font-size: 22px; font-weight: 650; letter-spacing: -0.01em; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 24px; line-height: 1.6; }
+
+  /* 拖拽区 */
+  .dropzone {
+    border: 1.5px dashed var(--line); border-radius: var(--radius); background: #fafafa;
+    padding: 44px 24px; text-align: center; cursor: pointer; transition: border-color .18s, background .18s, transform .18s;
+  }
+  .dropzone:hover { border-color: var(--indigo); background: var(--indigo-weak); }
+  .dropzone.drag { border-color: var(--indigo); background: var(--indigo-weak); transform: translateY(-2px); box-shadow: 0 8px 24px rgba(79,70,229,.12); }
+  .dz-ico { font-size: 30px; line-height: 1; color: var(--indigo); }
+  .dz-title { font-weight: 600; margin-top: 12px; font-size: 15px; }
+  .dz-sub { color: var(--muted); font-size: 13px; margin-top: 6px; }
+  .dz-formats { margin-top: 14px; display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; }
+  .chip { font-family: var(--mono); font-size: 11px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--muted); background: #fff; }
+  .btn { font-family: var(--sans); font-size: 13px; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; color: var(--fg); cursor: pointer; transition: background .15s, border-color .15s, transform .15s; }
+  .btn:hover { background: #f4f4f5; }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: var(--indigo); color: #fff; border-color: var(--indigo); }
+  .btn.primary:hover { background: #4338ca; }
+  .btn.sm { padding: 6px 11px; font-size: 12px; }
+
+  /* 状态区 */
+  .state { margin-top: 22px; }
+  .hidden { display: none !important; }
+  .panel { border: 1px solid var(--line); border-radius: var(--radius); background: #fff; overflow: hidden; }
+
+  /* 加载 */
+  .loading { display: flex; align-items: center; gap: 12px; padding: 22px; color: var(--muted); font-size: 14px; }
+  .spinner { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--indigo); border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* 错误 */
+  .banner { display: flex; gap: 12px; padding: 16px 18px; border-radius: var(--radius); font-size: 14px; line-height: 1.6; align-items: flex-start; }
+  .banner.err { background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; }
+  .banner.empty { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; }
+  .banner .b-ico { font-size: 18px; line-height: 1.2; flex: none; }
+  .banner code { font-family: var(--mono); font-size: 12px; background: rgba(0,0,0,.05); padding: 1px 5px; border-radius: 4px; }
+
+  /* meta */
+  .meta { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); align-items: center; background: #fafafa; }
+  .meta .m { font-size: 12px; color: var(--muted); }
+  .meta .m b { color: var(--fg); font-family: var(--mono); font-weight: 600; }
+  .meta .spacer { flex: 1; }
+
+  /* sheet tabs */
+  .tabs { display: flex; gap: 4px; padding: 10px 16px 0; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+  .tab { font-size: 12px; padding: 6px 12px; border: 1px solid transparent; border-bottom: none; border-radius: 7px 7px 0 0; cursor: pointer; color: var(--muted); background: #f4f4f5; }
+  .tab.active { background: #fff; color: var(--indigo); border-color: var(--line); font-weight: 600; }
+
+  /* 表格 */
+  .table-scroll { max-height: 520px; overflow: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  thead th {
+    position: sticky; top: 0; background: #fff; border-bottom: 1.5px solid var(--line); text-align: left;
+    padding: 9px 12px; font-weight: 600; color: var(--fg); cursor: pointer; white-space: nowrap; user-select: none;
+  }
+  thead th:hover { color: var(--indigo); }
+  thead th .sort { font-size: 10px; color: var(--muted); margin-left: 4px; }
+  tbody td { padding: 8px 12px; border-bottom: 1px solid #f4f4f5; white-space: nowrap; }
+  tbody tr:nth-child(even) { background: #fcfcfd; }
+  tbody td.num { font-family: var(--mono); text-align: right; }
+  tbody td.null { color: #c4c4c8; }
+  .truncate { max-width: 360px; overflow: hidden; text-overflow: ellipsis; }
+
+  .foot-note { color: var(--muted); font-size: 12px; padding: 10px 16px; border-top: 1px solid var(--line); background: #fafafa; }
+  .toolbar { display: flex; gap: 8px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--line); }
+  .toolbar .spacer { flex: 1; }
+  .count { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>文件上传与解析模块</h1>
+  <p class="sub">支持 CSV / TSV / Excel(.xlsx/.xls) / JSON 上传，自动解析并结构化呈现。包含格式校验、解析失败提示、空数据反馈与加载状态，全流程闭环、无静默失败。</p>
+
+  <div id="dropzone" class="dropzone" tabindex="0" role="button" aria-label="选择或拖入文件">
+    <div class="dz-ico">⤓</div>
+    <div class="dz-title">点击选择文件，或将文件拖拽到此处</div>
+    <div class="dz-sub">解析在浏览器本地完成，文件不会上传到任何服务器</div>
+    <div class="dz-formats">
+      <span class="chip">.csv</span><span class="chip">.tsv</span><span class="chip">.txt</span>
+      <span class="chip">.xlsx</span><span class="chip">.xls</span><span class="chip">.json</span>
+    </div>
+    <input id="fileInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json" class="hidden" />
+  </div>
+
+  <div id="state" class="state"></div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var ALLOWED = {
+    csv:  { label: "CSV / 分隔文本", kind: "text" },
+    tsv:  { label: "TSV", kind: "text" },
+    txt:  { label: "分隔文本", kind: "text" },
+    xlsx: { label: "Excel", kind: "excel" },
+    xls:  { label: "Excel", kind: "excel" },
+    json: { label: "JSON", kind: "json" }
+  };
+  var MAX_RENDER_ROWS = 2000; // 仅限制渲染行数，并非丢弃数据
+
+  var el = {
+    dz: document.getElementById("dropzone"),
+    input: document.getElementById("fileInput"),
+    state: document.getElementById("state")
+  };
+
+  var current = null; // { tables: [{name, columns, rows}], meta }
+
+  /* ---------- 工具 ---------- */
+  function extOf(name) {
+    var i = name.lastIndexOf(".");
+    return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+  }
+  function fmtSize(b) {
+    if (b < 1024) return b + " B";
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + " KB";
+    return (b / 1024 / 1024).toFixed(2) + " MB";
+  }
+  function fmtVal(v) {
+    if (v == null) return { text: "—", cls: "null" };
+    if (typeof v === "boolean") return { text: v ? "true" : "false" };
+    if (v instanceof Date) return { text: v.toISOString().slice(0, 10) };
+    var s = String(v);
+    var num = (typeof v === "number") || (/^-?\d[\d,]*(\.\d+)?$/.test(s) && s.replace(/,/g, "").length <= 16);
+    return { text: s, cls: num ? "num" : "" };
+  }
+
+  /* ---------- 状态渲染 ---------- */
+  function setStateLoading(fileName) {
+    el.state.innerHTML =
+      '<div class="loading"><div class="spinner"></div><div>正在解析 <b style="margin:0 4px">' +
+      esc(fileName) + '</b>，请稍候…</div></div>';
+  }
+  function setStateError(fileName, message) {
+    el.state.innerHTML =
+      '<div class="banner err"><div class="b-ico">⚠</div><div><div style="font-weight:600;margin-bottom:4px">解析失败：' +
+      esc(fileName) + '</div><div>' + esc(message) + '</div>' +
+      '<div style="margin-top:10px"><button class="btn sm" id="retry">重新选择文件</button></div></div></div>';
+    document.getElementById("retry").addEventListener("click", function () { el.input.click(); });
+  }
+  function setStateEmpty(fileName) {
+    el.state.innerHTML =
+      '<div class="banner empty"><div class="b-ico">∅</div><div><div style="font-weight:600;margin-bottom:4px">无数据</div>' +
+      '<div>文件 <b>' + esc(fileName) + '</b> 解析成功，但其中没有任何可呈现的行。</div>' +
+      '<div style="margin-top:8px;color:#92400e">可能原因：文件只有表头无数据行、JSON 为空数组 / 空对象、或所有行均为空。请检查文件内容。</div></div></div>';
+  }
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  /* ---------- 解析器 ---------- */
+  function readText(buf) {
+    // 尝试 UTF-8（含 BOM 剥离）
+    var bytes = new Uint8Array(buf);
+    if (bytes.length >= 3 && bytes[0] === 0xEF && bytes[1] === 0xBB && bytes[2] === 0xBF) {
+      return new TextDecoder("utf-8").decode(bytes.subarray(3));
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  function detectDelimiter(text) {
+    var sample = text.slice(0, 6000);
+    var cands = [",", "\t", ";", "|"];
+    var best = ",", bestCount = -1;
+    cands.forEach(function (d) {
+      var count = sample.split(d).length;
+      if (count > bestCount) { bestCount = count; best = d; }
+    });
+    return best;
+  }
+
+  function parseCSV(text) {
+    var delim = detectDelimiter(text);
+    var rows = [], row = [], field = "", i = 0, inQ = false;
+    while (i < text.length) {
+      var ch = text[i];
+      if (inQ) {
+        if (ch === '"') {
+          if (text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQ = false; i++; continue;
+        }
+        field += ch; i++; continue;
+      }
+      if (ch === '"') { inQ = true; i++; continue; }
+      if (ch === delim) { row.push(field); field = ""; i++; continue; }
+      if (ch === "\r") { i++; continue; }
+      if (ch === "\n") { row.push(field); rows.push(row); row = []; field = ""; i++; continue; }
+      field += ch; i++;
+    }
+    if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+    return rows.filter(function (r) { return r.some(function (c) { return String(c).trim() !== ""; }); });
+  }
+
+  function aoaToTable(aoa) {
+    var hIdx = aoa.findIndex(function (r) {
+      return r && r.some(function (c) { return c != null && String(c).trim() !== ""; });
+    });
+    if (hIdx < 0) return { columns: [], rows: [] };
+    var header = aoa[hIdx].map(function (h, i) {
+      return (h == null || String(h).trim() === "") ? ("列" + (i + 1)) : String(h).trim();
+    });
+    var rows = [];
+    for (var r = hIdx + 1; r < aoa.length; r++) {
+      var ar = aoa[r];
+      if (!ar || ar.every(function (c) { return c == null || String(c).trim() === ""; })) continue;
+      var obj = {};
+      header.forEach(function (h, i) { obj[h] = (ar[i] === undefined) ? null : ar[i]; });
+      rows.push(obj);
+    }
+    return { columns: header, rows: rows };
+  }
+
+  function parseExcel(buf) {
+    if (typeof XLSX === "undefined") throw new Error("Excel 解析库未加载（请检查网络或 vendor/xlsx.full.min.js）。");
+    var wb = XLSX.read(buf, { type: "array", raw: true, cellDates: true });
+    return wb.SheetNames.map(function (name) {
+      var ws = wb.Sheets[name];
+      var aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: false });
+      var t = aoaToTable(aoa);
+      return { name: name, columns: t.columns, rows: t.rows };
+    });
+  }
+
+  function parseJSON(text) {
+    var data;
+    try { data = JSON.parse(text); }
+    catch (e) { throw new Error("JSON 语法错误：" + (e.message || e)); }
+
+    if (Array.isArray(data)) {
+      if (data.length === 0) return { columns: [], rows: [] };
+      var first = data[0];
+      if (first && typeof first === "object" && !Array.isArray(first)) {
+        var cols = [];
+        data.forEach(function (o) {
+          if (o && typeof o === "object") Object.keys(o).forEach(function (k) { if (cols.indexOf(k) < 0) cols.push(k); });
+        });
+        var rows = data.map(function (o) {
+          var r = {}; cols.forEach(function (c) { r[c] = (o && typeof o === "object" && c in o) ? o[c] : null; }); return r;
+        });
+        return { columns: cols, rows: rows };
+      }
+      if (Array.isArray(first)) {
+        var h = first.map(function (_, i) { return "列" + (i + 1); });
+        var r2 = data.slice(1).map(function (ar) {
+          var o = {}; h.forEach(function (c, i) { o[c] = (ar[i] === undefined) ? null : ar[i]; }); return o;
+        });
+        return { columns: h, rows: r2 };
+      }
+      return { columns: ["值"], rows: data.map(function (v) { return { "值": v }; }) };
+    }
+    if (data && typeof data === "object") {
+      var keys = Object.keys(data);
+      var f0 = data[keys[0]];
+      if (f0 && typeof f0 === "object" && !Array.isArray(f0)) {
+        var c2 = ["键"];
+        keys.forEach(function (k) { Object.keys(data[k]).forEach(function (c) { if (c2.indexOf(c) < 0) c2.push(c); }); });
+        var r3 = keys.map(function (k) {
+          var o = { "键": k }; c2.slice(1).forEach(function (c) { o[c] = data[k] ? data[k][c] : null; }); return o;
+        });
+        return { columns: c2, rows: r3 };
+      }
+      return { columns: ["键", "值"], rows: keys.map(function (k) { return { "键": k, "值": data[k] }; }) };
+    }
+    throw new Error("无法识别的 JSON 结构：顶层需为对象或数组。");
+  }
+
+  function parseTextTables(text) {
+    var aoa = parseCSV(text);
+    var t = aoaToTable(aoa);
+    return [{ name: "文本", columns: t.columns, rows: t.rows }];
+  }
+
+  /* ---------- 主流程 ---------- */
+  function handleFile(file) {
+    if (!file) return;
+    var ext = extOf(file.name);
+    var info = ALLOWED[ext];
+
+    // 1) 格式校验
+    if (!info) {
+      setStateError(file.name, "不支持的文件格式 <code>." + esc(ext || "?") + "</code>。仅支持：" +
+        Object.keys(ALLOWED).map(function (k) { return "." + k; }).join("、") + "。");
+      return;
+    }
+    if (file.size === 0) {
+      setStateError(file.name, "文件大小为 0 字节，文件为空，无法解析。");
+      return;
+    }
+
+    setStateLoading(file.name);
+
+    // 2) 异步读取 + 解析（让 loading 先渲染）
+    var t0 = performance.now();
+    file.arrayBuffer().then(function (buf) {
+      setTimeout(function () {
+        try {
+          var tables;
+          if (info.kind === "excel") {
+            tables = parseExcel(buf);
+          } else if (info.kind === "json") {
+            tables = [parseJSON(readText(buf))];
+          } else {
+            tables = parseTextTables(readText(buf));
+          }
+
+          // 3) 空数据判定（避免静默无呈现）
+          var totalRows = tables.reduce(function (s, t) { return s + t.rows.length; }, 0);
+          if (totalRows === 0) { setStateEmpty(file.name); current = null; return; }
+
+          current = {
+            tables: tables,
+            meta: {
+              name: file.name, size: file.size, format: info.label,
+              sheets: tables.length, rows: totalRows,
+              ms: Math.round(performance.now() - t0)
+            }
+          };
+          renderData();
+        } catch (err) {
+          setStateError(file.name, (err && err.message) ? err.message : String(err));
+          current = null;
+        }
+      }, 40);
+    }).catch(function (e) {
+      setStateError(file.name, "文件读取失败：" + ((e && e.message) || e));
+      current = null;
+    });
+  }
+
+  /* ---------- 数据呈现 ---------- */
+  var activeSheet = 0;
+  var sortState = { col: null, dir: 1 };
+
+  function renderData() {
+    if (!current) return;
+    var m = current.meta;
+    var html = '<div class="panel">';
+    html += '<div class="meta">' +
+      '<span class="m">文件 <b>' + esc(m.name) + '</b></span>' +
+      '<span class="m">大小 <b>' + fmtSize(m.size) + '</b></span>' +
+      '<span class="m">格式 <b>' + esc(m.format) + '</b></span>' +
+      '<span class="m">工作表 <b>' + m.sheets + '</b></span>' +
+      '<span class="m">数据行 <b>' + m.rows + '</b></span>' +
+      '<span class="m">耗时 <b>' + m.ms + 'ms</b></span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn sm" id="reupload">重新上传</button>' +
+      '</div>';
+
+    if (current.tables.length > 1) {
+      html += '<div class="tabs">';
+      current.tables.forEach(function (t, i) {
+        html += '<div class="tab' + (i === activeSheet ? " active" : "") + '" data-sheet="' + i + '">' +
+          esc(t.name) + ' (' + t.rows.length + ')</div>';
+      });
+      html += '</div>';
+    }
+
+    var tbl = current.tables[activeSheet];
+    html += '<div class="toolbar"><span class="count">' + tbl.columns.length + ' 列 · ' + tbl.rows.length + ' 行</span>' +
+      '<span class="spacer"></span>' +
+      '<button class="btn sm" id="copyJson">复制 JSON</button></div>';
+
+    html += '<div class="table-scroll">' + buildTableHTML(tbl) + '</div>';
+    if (tbl.rows.length > MAX_RENDER_ROWS) {
+      html += '<div class="foot-note">为保证流畅，仅渲染前 ' + MAX_RENDER_ROWS + ' 行（共 ' + tbl.rows.length + ' 行，数据已完整解析）。</div>';
+    }
+    html += '</div>';
+    el.state.innerHTML = html;
+
+    // 事件
+    document.getElementById("reupload").addEventListener("click", function () { el.input.click(); });
+    document.getElementById("copyJson").addEventListener("click", function () {
+      var json = JSON.stringify(current.tables[activeSheet].rows, null, 2);
+      navigator.clipboard.writeText(json).then(function () {
+        var b = document.getElementById("copyJson"); b.textContent = "已复制 ✓"; setTimeout(function () { b.textContent = "复制 JSON"; }, 1500);
+      }).catch(function () { alert("复制失败，请手动选择。"); });
+    });
+    Array.prototype.forEach.call(el.state.querySelectorAll(".tab"), function (tab) {
+      tab.addEventListener("click", function () { activeSheet = +tab.dataset.sheet; sortState = { col: null, dir: 1 }; renderData(); });
+    });
+    Array.prototype.forEach.call(el.state.querySelectorAll("thead th"), function (th) {
+      th.addEventListener("click", function () {
+        var col = th.dataset.col;
+        if (sortState.col === col) sortState.dir *= -1; else { sortState.col = col; sortState.dir = 1; }
+        renderData();
+      });
+    });
+  }
+
+  function buildTableHTML(tbl) {
+    var rows = tbl.rows.slice();
+    if (sortState.col) {
+      var c = sortState.col, d = sortState.dir;
+      rows.sort(function (a, b) {
+        var va = a[c], vb = b[c];
+        if (va == null) return 1; if (vb == null) return -1;
+        if (typeof va === "number" && typeof vb === "number") return (va - vb) * d;
+        return String(va).localeCompare(String(vb), "zh") * d;
+      });
+    }
+    var head = "<tr>" + tbl.columns.map(function (c) {
+      var arrow = (sortState.col === c) ? (sortState.dir > 0 ? " ▲" : " ▼") : "";
+      return '<th data-col="' + esc(c) + '">' + esc(c) + '<span class="sort">' + arrow + '</span></th>';
+    }).join("") + "</tr>";
+
+    var body = rows.slice(0, MAX_RENDER_ROWS).map(function (r) {
+      return "<tr>" + tbl.columns.map(function (c) {
+        var f = fmtVal(r[c]);
+        var txt = f.text;
+        if (txt.length > 120) txt = '<span class="truncate">' + esc(txt) + "</span>";
+        else txt = esc(txt);
+        return '<td class="' + (f.cls || "") + '">' + txt + "</td>";
+      }).join("") + "</tr>";
+    }).join("");
+
+    return '<table><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+  }
+
+  /* ---------- 交互绑定 ---------- */
+  el.dz.addEventListener("click", function () { el.input.click(); });
+  el.dz.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); el.input.click(); } });
+  el.input.addEventListener("change", function (e) { if (e.target.files[0]) handleFile(e.target.files[0]); el.input.value = ""; });
+
+  ["dragenter", "dragover"].forEach(function (ev) {
+    el.dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); el.dz.classList.add("drag"); });
+  });
+  ["dragleave", "dragend"].forEach(function (ev) {
+    el.dz.addEventListener(ev, function (e) { e.preventDefault(); e.stopPropagation(); el.dz.classList.remove("drag"); });
+  });
+  el.dz.addEventListener("drop", function (e) {
+    e.preventDefault(); e.stopPropagation(); el.dz.classList.remove("drag");
+    var f = e.dataTransfer.files && e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  });
+  // 防止整页被拖入文件时浏览器直接打开
+  window.addEventListener("dragover", function (e) { e.preventDefault(); });
+  window.addEventListener("drop", function (e) { e.preventDefault(); });
+})();
+</script>
+</body>
+</html>

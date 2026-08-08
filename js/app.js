@@ -1046,6 +1046,113 @@
     });
   }
 
+  // —— 通用文件解析（CSV / Excel / JSON 本地上传解析）——
+  function renderFileParser() {
+    let html = '<div class="panel"><div class="panel-title">文件解析 · 通用上传</div>';
+    html += '<div class="panel-desc">浏览器本地解析，文件不上传服务器。支持 CSV / TSV / Excel(.xlsx/.xls) / JSON，自动结构化呈现（表格）。</div>';
+    html += '<div id="fpDrop" class="fp-dropzone" tabindex="0" role="button">' +
+      '<div class="fp-ico">⤓</div>' +
+      '<div class="fp-title">点击选择文件，或将文件拖拽到此处</div>' +
+      '<div class="fp-sub">解析在浏览器本地完成，文件不会上传到任何服务器</div>' +
+      '<div class="fp-formats"><span class="fp-chip">.csv</span><span class="fp-chip">.tsv</span><span class="fp-chip">.txt</span><span class="fp-chip">.xlsx</span><span class="fp-chip">.xls</span><span class="fp-chip">.json</span></div>' +
+      '<input id="fpInput" type="file" accept=".csv,.tsv,.txt,.xlsx,.xls,.json" style="display:none" />' +
+      '</div><div id="fpState"></div></div>';
+    $('#content').innerHTML = html;
+
+    const drop = $('#fpDrop'), input = $('#fpInput'), state = $('#fpState');
+    let current = null, activeSheet = 0, sortState = { col: null, dir: 1 };
+
+    drop.addEventListener('click', () => input.click());
+    drop.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); input.click(); } });
+    input.addEventListener('change', (e) => { if (e.target.files[0]) startParse(e.target.files[0]); input.value = ''; });
+    ['dragenter', 'dragover'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.add('drag'); }));
+    ['dragleave', 'dragend'].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag'); }));
+    drop.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); drop.classList.remove('drag'); const f = e.dataTransfer.files && e.dataTransfer.files[0]; if (f) startParse(f); });
+
+    function fmtSize(b) {
+      if (b < 1024) return b + ' B';
+      if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+      return (b / 1024 / 1024).toFixed(2) + ' MB';
+    }
+    function fmtVal(v) {
+      if (v == null) return { text: '—', cls: 'fp-null' };
+      if (typeof v === 'boolean') return { text: v ? 'true' : 'false' };
+      if (v instanceof Date) return { text: v.toISOString().slice(0, 10) };
+      const s = String(v);
+      const num = (typeof v === 'number') || (/^-?\d[\d,]*(\.\d+)?$/.test(s) && s.replace(/,/g, '').length <= 16);
+      return { text: s, cls: num ? 'num' : '' };
+    }
+    function buildTable(tbl) {
+      const rows = tbl.rows.slice();
+      if (sortState.col) {
+        const c = sortState.col, d = sortState.dir;
+        rows.sort((a, b) => {
+          const va = a[c], vb = b[c];
+          if (va == null) return 1; if (vb == null) return -1;
+          if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * d;
+          return String(va).localeCompare(String(vb), 'zh') * d;
+        });
+      }
+      const head = '<tr>' + tbl.columns.map((c) => {
+        const ar = (sortState.col === c) ? (sortState.dir > 0 ? ' ▲' : ' ▼') : '';
+        return '<th data-col="' + esc(c) + '">' + esc(c) + '<span class="fp-sort">' + ar + '</span></th>';
+      }).join('') + '</tr>';
+      const body = rows.slice(0, 2000).map((r) => '<tr>' + tbl.columns.map((c) => {
+        const f = fmtVal(r[c]); let t = f.text;
+        if (t.length > 120) t = '<span class="fp-truncate">' + esc(t) + '</span>'; else t = esc(t);
+        return '<td class="' + (f.cls || '') + '">' + t + '</td>';
+      }).join('') + '</tr>').join('');
+      return '<table><thead>' + head + '</thead><tbody>' + body + '</tbody></table>';
+    }
+    function renderData() {
+      if (!current) return;
+      const m = current.meta, tbl = current.tables[activeSheet];
+      let h = '<div class="fp-meta">' +
+        '<span class="m">文件 <b>' + esc(m.name) + '</b></span>' +
+        '<span class="m">大小 <b>' + fmtSize(m.size) + '</b></span>' +
+        '<span class="m">格式 <b>' + esc(m.format) + '</b></span>' +
+        '<span class="m">工作表 <b>' + m.sheets + '</b></span>' +
+        '<span class="m">数据行 <b>' + m.rows + '</b></span>' +
+        '<span class="m">耗时 <b>' + m.ms + 'ms</b></span>' +
+        '<span class="fp-spacer"></span><button class="btn sm" id="fpAgain">重新上传</button></div>';
+      if (current.tables.length > 1) {
+        h += '<div class="fp-tabs">';
+        current.tables.forEach((t, i) => { h += '<div class="fp-tab' + (i === activeSheet ? ' active' : '') + '" data-s="' + i + '">' + esc(t.name) + ' (' + t.rows.length + ')</div>'; });
+        h += '</div>';
+      }
+      h += '<div class="fp-toolbar"><span class="fp-count">' + tbl.columns.length + ' 列 · ' + tbl.rows.length + ' 行</span><span class="fp-spacer"></span><button class="btn sm" id="fpCopy">复制 JSON</button></div>';
+      h += '<div class="table-wrap"><div class="fp-scroll">' + buildTable(tbl) + '</div></div>';
+      if (tbl.rows.length > 2000) h += '<div class="fp-note">为保证流畅，仅渲染前 2000 行（共 ' + tbl.rows.length + ' 行，数据已完整解析）。</div>';
+      state.innerHTML = h;
+      $('#fpAgain').addEventListener('click', () => input.click());
+      $('#fpCopy').addEventListener('click', () => {
+        const json = JSON.stringify(current.tables[activeSheet].rows, null, 2);
+        navigator.clipboard.writeText(json).then(() => { const b = $('#fpCopy'); b.textContent = '已复制 ✓'; setTimeout(() => b.textContent = '复制 JSON', 1500); })
+          .catch(() => toast('复制失败'));
+      });
+      $all('#fpState .fp-tab').forEach((tab) => tab.addEventListener('click', () => { activeSheet = +tab.dataset.s; sortState = { col: null, dir: 1 }; renderData(); }));
+      $all('#fpState thead th').forEach((th) => th.addEventListener('click', () => {
+        const c = th.dataset.col;
+        if (sortState.col === c) sortState.dir *= -1; else { sortState.col = c; sortState.dir = 1; }
+        renderData();
+      }));
+    }
+    function startParse(file) {
+      state.innerHTML = '<div class="fp-loading"><div class="fp-spinner"></div><div>正在解析 <b>' + esc(file.name) + '</b>，请稍候…</div></div>';
+      CA.FileParser.parseFile(file).then((res) => {
+        if (res.meta.rows === 0) {
+          state.innerHTML = '<div class="fp-banner empty"><div class="fp-ico">∅</div><div><div style="font-weight:600;margin-bottom:4px">无数据</div><div>文件 <b>' + esc(file.name) + '</b> 解析成功，但其中没有任何可呈现的行（可能只有表头、空数组或全空行）。</div></div></div>';
+          current = null; return;
+        }
+        current = res; activeSheet = 0; sortState = { col: null, dir: 1 }; renderData();
+      }).catch((err) => {
+        state.innerHTML = '<div class="fp-banner err"><div class="fp-ico">⚠</div><div><div style="font-weight:600;margin-bottom:4px">解析失败：' + esc(file.name) + '</div><div>' + esc(err.message || err) + '</div><div style="margin-top:10px"><button class="btn sm" id="fpRetry">重新选择文件</button></div></div></div>';
+        const rb = $('#fpRetry'); if (rb) rb.addEventListener('click', () => input.click());
+        current = null;
+      });
+    }
+  }
+
   // —— 路由 ——
   const tabs = {
     kezu: { title: '最佳科组', render: renderKezu },
@@ -1054,6 +1161,7 @@
     dashboard: { title: '核心看板', render: renderDashboard },
     templates: { title: '模板中心', render: renderTemplates },
     data: { title: '数据备份', render: renderData },
+    fileparser: { title: '文件解析', render: renderFileParser },
   };
   function go(tab) {
     currentTab = tab;
