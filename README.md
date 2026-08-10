@@ -9,7 +9,6 @@
 - **教师 KPI**：上传教师周报 → 月度汇总 + 半年度汇总 → 按级别评定表自动评级（A/B/C/D）。
 - **五项满意度**：从月度周报自动提取续/结/退/停/推 五项率，月度趋势。
 - **对比中心**：月度=当月各周横向、季度/年度=各月「月度周报」横向，带图表。
-- **模板中心**：科组/教师周报表头映射可上传覆盖。
 - **数据备份**：存浏览器本地，可导出/导入 `data.json`。
 
 ## 目录
@@ -17,9 +16,8 @@
 ```
 index.html              入口
 styles.css              样式（Linear.app 风格）
-js/                     逻辑层（schema/rulebook/templates/store/parser/aggregate/app/sample-data）
+js/                     逻辑层（schema/rulebook/store/parser/aggregate/app/sample-data）
 vendor/                 本地化的 SheetJS、Chart.js（可离线）
-templates/              科组/教师 起步 xlsx 模板（下载用，由前端生成，可不随站部署）
 sample-data.json        示例数据（演示用，可不随站部署）
 ```
 

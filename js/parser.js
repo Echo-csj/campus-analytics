@@ -7,6 +7,31 @@
   'use strict';
   const CA = global.CA || (global.CA = {});
 
+  // 科组/教师 周报默认表头 → 内部字段（模板中心已移除，内联默认映射供解析使用）
+  const DIM_DEFAULT = {
+    kezu: {
+      dimensionHeader: '科组',
+      map: {
+        '科组': 'dimension', '单科数': 'subjects', '课时': 'hours',
+        '结课单科': 'jkSubj', '退费单科': 'tfSubj', '停课单科': 'tkSubj',
+        '续费单科': 'xfSubj', '推荐单科': 'tjSubj', '教师数': 'teacherCount',
+        '离职人数': 'quitCount', '进步率': 'progressRate',
+      },
+    },
+    kpi: {
+      dimensionHeader: '教师',
+      map: {
+        '教师': 'dimension', '学科组': 'subjectGroup', '周课时': 'weekHours',
+        '周课次': 'weekSessions', '周参考课次': 'weekRefSessions',
+        '周饱和度': 'saturation', '周进步率': 'progressRate',
+      },
+    },
+  };
+
+  function getDimMapping(stream) {
+    return DIM_DEFAULT[stream] || DIM_DEFAULT.kpi;
+  }
+
   function toNum(v) {
     if (v == null) return null;
     if (typeof v === 'number') return v;
@@ -126,7 +151,7 @@
           const ws = wb.Sheets[wb.SheetNames[0]];
           const matrix = sheetToMatrix(ws);
           const fmtMatrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
-          const mapping = CA.templates.getMapping(stream);
+          const mapping = getDimMapping(stream);
           // 找到表头行（含 dimensionHeader）
           let headerIdx = -1;
           for (let i = 0; i < Math.min(matrix.length, 10); i++) {

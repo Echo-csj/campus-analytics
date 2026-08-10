@@ -1,12 +1,12 @@
 /*
  * app.js — UI 控制器
- * 板块：最佳科组 / 教师KPI / 数据源（历史周报批量入库 + 数据库视图：年度各月对比）/ 核心看板（年度·季度·五项满意度）/ 模板中心 / 数据备份
+ * 板块：最佳科组 / 教师KPI / 数据源（历史周报批量入库 + 数据库视图：年度各月对比）/ 核心看板（年度·季度·五项满意度）/ 数据备份
  * 数据链路：所有汇总数据统一由 CA.aggregate 聚合层从 store 的月度周报派生，UI 不散算。
  */
 (function (global) {
   'use strict';
   const CA = global.CA;
-  const SCHEMA = CA.SCHEMA, RB = CA.rulebook, TPL = CA.templates, STORE = CA.store, PARSER = CA.parser, AGG = CA.aggregate;
+  const SCHEMA = CA.SCHEMA, RB = CA.rulebook, STORE = CA.store, PARSER = CA.parser, AGG = CA.aggregate;
 
   let currentTab = 'weekly';
   let pending = null; // 待确认入库的解析结果
@@ -1009,85 +1009,6 @@
     }
   }
 
-  // —— 模板中心 ——
-  function renderTemplates() {
-    const BK = CA.BESTKEZU;
-    let html = '<div class="panel"><div class="panel-title">模板中心</div>';
-    html += '<div class="panel-desc">最佳科组为「科组×月标准化月度数据」，固定 19 列字段（含系统派生），表头模糊匹配、各率与周平均由系统统一重算。教师周报仍为「按周独立台账」，可上传映射覆盖或下载起步模板。</div>';
-
-    // —— 最佳科组 标准化字段说明 ——
-    html += '<div class="section-h">最佳科组 · 标准化字段（固定格式）</div>';
-    html += '<div class="panel-desc">下表为系统标准字段，上传文件时按表头自动匹配；带「派生」标记的列无需填写，由系统按口径计算（周平均 / 各率 / 季度）。</div>';
-    html += '<div class="table-wrap"><table><thead><tr><th>字段 key</th><th>中文名</th><th>类型</th><th>说明</th><th>必填</th></tr></thead><tbody>';
-    BK.FIELDS.forEach(f => {
-      html += '<tr><td><code>' + f.key + '</code></td><td>' + f.label + '</td>' +
-        '<td>' + (f.type === 'calc' ? '派生' : (f.type === 'text' ? '文本' : '数值')) + '</td>' +
-        '<td>' + (f.desc || '') + '</td>' +
-        '<td>' + (f.required ? '是' : '—') + '</td></tr>';
-    });
-    html += '</tbody></table></div>';
-    html += '<div class="row" style="margin:8px 0 4px"><button class="btn sm" id="bk_dl_tpl">下载最佳科组标准化起步模板</button>' +
-      '<span class="hint" style="margin-left:8px">含 2 行示例（数学1月 / 英语4月），派生列留空由系统计算</span></div>';
-
-    // —— 教师周报（旧式映射）——
-    const map = TPL.getMapping('kpi');
-    html += '<div class="section-h">教师周报 · 当前映射</div><div class="table-wrap"><table><thead><tr><th>表头</th><th>→ 内部字段</th></tr></thead><tbody>';
-    Object.entries(map.map).forEach(([h, k]) => { html += '<tr><td>' + h + '</td><td><code>' + k + '</code></td></tr>'; });
-    html += '</tbody></table></div>';
-    html += '<div class="row" style="margin:8px 0 4px"><button class="btn sm" data-dl="kpi">下载教师周报起步模板</button>' +
-      '<label class="btn sm ghost">上传映射表覆盖<input type="file" accept=".xlsx,.xls" data-map="kpi" hidden/></label></div>';
-
-    html += '</div>';
-    $('#content').innerHTML = html;
-    const dl = $('#bk_dl_tpl');
-    if (dl) dl.addEventListener('click', downloadBestKezuTemplate);
-    $all('[data-dl]').forEach(b => b.addEventListener('click', () => downloadTemplate(b.dataset.dl)));
-    $all('[data-map]').forEach(inp => inp.addEventListener('change', e => uploadMapping(inp.dataset.map, e.target.files[0])));
-  }
-
-  function downloadBestKezuTemplate() {
-    const BK = CA.BESTKEZU;
-    const header = BK.FIELDS.map(f => f.label);
-    const sample = [
-      [2026, 1, '数学', 1035, 60, 4, 1, 1, 1, 6, 11, 0, '', '', '', '', '', '', '', ''],
-      [2026, 4, '英语', 825, 42, 5, 0, 0, 2, 9, 10, 1, '', '', '', '', '', '', '', ''],
-    ];
-    const aoa = [header, ...sample];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '标准化模板');
-    XLSX.writeFile(wb, '最佳科组_标准化起步模板.xlsx');
-    toast('已下载模板');
-  }
-
-  function downloadTemplate(stream) {
-    const cols = TPL.starterColumns[stream];
-    const aoa = [cols, cols.map(() => '')];
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, '模板');
-    XLSX.writeFile(wb, (stream === 'kezu' ? '科组周报模板' : '教师周报模板') + '.xlsx');
-    toast('已下载模板');
-  }
-
-  function uploadMapping(stream, file) {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const wb = XLSX.read(e.target.result, { type: 'array' });
-      const ws = wb.Sheets[wb.SheetNames[0]];
-      const matrix = XLSX.utils.sheet_to_json(ws, { header: 1 });
-      const headers = (matrix[0] || []).map(c => c == null ? '' : String(c).trim());
-      const allFields = (stream === 'kezu' ? SCHEMA.kezuFields : SCHEMA.kpiFields).map(f => f.key);
-      const map = { dimensionHeader: headers[0], map: {} };
-      headers.forEach(h => { if (allFields.includes(h)) map.map[h] = h; });
-      // 维度列（科组/教师）
-      map.map[headers[0]] = 'dimension';
-      TPL.saveOverride(stream, map);
-      toast('已覆盖「' + (stream === 'kezu' ? '科组' : '教师') + '」映射，刷新后生效');
-      renderTemplates();
-    };
-    reader.readAsArrayBuffer(file);
-  }
 
   // —— 数据备份 ——
   function renderData() {
@@ -1261,7 +1182,6 @@
     kpi: { title: '教师 KPI', render: renderKpi },
     compare: { title: '数据源', render: renderCompare },
     dashboard: { title: '核心看板', render: renderDashboard },
-    templates: { title: '模板中心', render: renderTemplates },
     data: { title: '数据备份', render: renderData },
     fileparser: { title: '文件解析', render: renderFileParser },
   };
