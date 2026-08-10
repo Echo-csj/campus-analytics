@@ -327,6 +327,70 @@
     return h;
   }
 
+  // 科组季度汇总（年内 科组×季度 口径）；聚合逻辑与年度一致，仅按季度（年+科组+季度）分组
+  function kezuQuarter(rs) {
+    const byKey = {};
+    rs.forEach(r => {
+      const key = r.subject + '|' + r.quarter;
+      (byKey[key] = byKey[key] || []).push(r);
+    });
+    const out = [];
+    Object.keys(byKey).forEach(key => {
+      const g = byKey[key];
+      const [subj, q] = key.split('|');
+      const sum = k => g.reduce((a, r) => a + (r[k] || 0), 0);
+      const n = g.length;
+      const totalHours = sum('hours'), totalWeeks = sum('weeks');
+      const avgSubjects = n ? sum('subjects') / n : 0;
+      const xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
+      const last = g.slice().sort((a, b) => b.month - a.month)[0];
+      const lastTeachers = last.teachers || 0;
+      out.push({
+        subject: subj, quarter: +q, totalHours, totalWeeks,
+        avgSubjects: Math.round(avgSubjects * 10) / 10,
+        quarterWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
+        xf, jk, tf, tk, qt,
+        xufeiRate: avgSubjects ? xf / avgSubjects : null,
+        jiekeRate: avgSubjects ? jk / avgSubjects : null,
+        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
+        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
+        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
+        teachers: lastTeachers
+      });
+    });
+    return out.sort((a, b) => a.subject.localeCompare(b.subject) || (a.quarter - b.quarter));
+  }
+  function kezuQuarterHTML(q) {
+    const cols = [
+      { l: '科组', s: true }, { l: '季度', k: 'quarter', q: true },
+      { l: '季度课时', k: 'totalHours' }, { l: '季度周数', k: 'totalWeeks' },
+      { l: '平均单科数', k: 'avgSubjects', d: 1 }, { l: '季度周平均', k: 'quarterWeekAvg', d: 2 },
+      { l: '续费', k: 'xf' }, { l: '结课', k: 'jk' }, { l: '退费', k: 'tf' }, { l: '停课', k: 'tk' }, { l: '离职', k: 'qt' },
+      { l: '续费率', k: 'xufeiRate', p: 1 }, { l: '结课率', k: 'jiekeRate', p: 1 }, { l: '退费率', k: 'tuifeiRate', p: 1 },
+      { l: '停课率', k: 'tingkeRate', p: 1 }, { l: '离职率', k: 'quitRate', p: 1 }, { l: '季末教师数', k: 'teachers' }
+    ];
+    q = q.filter(x => x.totalHours || x.xf || x.jk || x.tf || x.tk || x.qt || x.teachers); // 跳过全空季度
+    let h = '<div class="table-wrap"><table><thead><tr>';
+    cols.forEach(c => h += '<th class="' + (c.s ? '' : 'num') + '">' + c.l + '</th>');
+    h += '</tr></thead><tbody>';
+    if (!q.length) {
+      h += '<tr><td colspan="' + cols.length + '" class="empty">该年各季度暂无数据</td></tr>';
+    } else {
+      q.forEach(a => {
+        h += '<tr>';
+        cols.forEach(c => {
+          if (c.s) h += '<td>' + esc(a.subject) + '</td>';
+          else if (c.q) h += '<td class="num">Q' + a[c.k] + '</td>';
+          else if (c.p) h += '<td class="num">' + pct(a[c.k]) + '</td>';
+          else h += '<td class="num">' + fmt(a[c.k], c.d) + '</td>';
+        });
+        h += '</tr>';
+      });
+    }
+    h += '</tbody></table></div>';
+    return h;
+  }
+
   function exportBestKezu(stored) {
     const header = ['年份', '月份', '科组', '课时', '单科数', '周数', '结课', '停课', '退费', '续费', '教师数', '离职', '周平均', '结课率', '停课率', '退费率', '续费率', '离职率', '季度'];
     const keys = ['year', 'month', 'subject', 'hours', 'subjects', 'weeks', 'jieke', 'tingke', 'tuifei', 'xufei', 'teachers', 'quit', 'weekAvg', 'jiekeRate', 'tingkeRate', 'tuifeiRate', 'xufeiRate', 'quitRate', 'quarter'];
@@ -531,6 +595,7 @@
       html += '<button class="btn ghost" id="bk_export">导出标准化 Excel</button>';
       html += '<button class="btn ghost" id="bk_clear">清空本科组数据</button></div>';
       html += '<div class="section-h">月度明细（科组 × 月）</div><div id="bk_monthly_wrap"></div>';
+      html += '<div class="section-h">科组季度汇总（' + curYear + ' 年口径）</div><div id="bk_quarter_wrap"></div>';
       html += '<div class="section-h">科组年度汇总（' + curYear + ' 年口径）</div><div id="bk_annual_wrap"></div>';
       html += '<div class="chart-box"><canvas id="bkAnnualChart"></canvas></div></div>';
     } else {
@@ -548,6 +613,7 @@
       const fill = (year) => {
         const rs = stored.filter(r => r.year === year);
         $('#bk_monthly_wrap').innerHTML = kezuTableHTML(rs);
+        $('#bk_quarter_wrap').innerHTML = kezuQuarterHTML(kezuQuarter(rs));
         const ann = kezuAnnual(rs);
         $('#bk_annual_wrap').innerHTML = kezuAnnualHTML(ann);
         if (ann.length) drawBar('bkAnnualChart', ann.map(a => a.subject), ann.map(a => a.totalHours), '全年课时', 'rgba(79,70,229,.8)');
