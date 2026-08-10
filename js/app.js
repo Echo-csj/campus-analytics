@@ -921,6 +921,15 @@
         const labels = me.map(r => r.month + '月');
         const cashData = me.map(r => { const c = (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0); return c || null; });
         const rateData = me.map(r => r.values.v1MonthRate != null ? r.values.v1MonthRate * 100 : null);
+        // 完成率右轴自适应：避免写死 max:120 导致超额月份被天花板裁切，或完成率集中高位时折线被压扁
+        const validRates = rateData.filter(x => x != null);
+        let y1Min = 0, y1Max = 100;
+        if (validRates.length) {
+          const rMax = Math.max(...validRates), rMin = Math.min(...validRates);
+          y1Max = Math.max(100, Math.ceil((rMax + 10) / 10) * 10);
+          y1Min = rMin >= 50 ? Math.floor((rMin - 10) / 10) * 10 : 0;
+          if (y1Min < 0) y1Min = 0;
+        }
         charts['yrTrendChart'] = new Chart(ctx, {
           type: 'bar',
           data: { labels, datasets: [
@@ -928,7 +937,10 @@
             { label: '1V1生产完成率', data: rateData, type: 'line', borderColor: 'rgba(22,163,74,.9)', backgroundColor: 'rgba(22,163,74,.1)', borderWidth: 2, pointRadius: 4, yAxisID: 'y1', tension: .3 },
           ] },
           options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } },
-            scales: { y: { beginAtZero: true, title: { display: true, text: '现金(元)' } }, y1: { position: 'right', beginAtZero: true, max: 120, title: { display: true, text: '完成率(%)' }, grid: { drawOnChartArea: false } } } },
+            scales: {
+              y: { beginAtZero: true, title: { display: true, text: '现金(元)' } },
+              y1: { position: 'right', min: y1Min, max: y1Max, title: { display: true, text: '完成率(%)' }, grid: { drawOnChartArea: false }, ticks: { callback: v => v + '%' } },
+            } },
         });
       }
     }
