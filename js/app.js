@@ -1059,9 +1059,14 @@
         const pmEnd = manualLastDay(pm.year, pm.month);
         if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week; // 预测月已结束→全部周完成
       }
-      const { campusActual, campusSched, hasData } = actualSummary(pm.year, pm.month, reportWeek);
+      // 完成率：按已完成周实产；差距课时：固定减去「整月已预排」（不再随日期按已完成周漂移）
+      const done = actualSummary(pm.year, pm.month, reportWeek);
+      const whole = actualSummary(pm.year, pm.month, null);
+      const campusActual = done.campusActual;
+      const campusSched = whole.campusSched;
+      const hasData = whole.hasData;
       const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
-      // 校区生产差距课时 = 生产指标（对应 G 档）− 预排总数据（累计至已完成周）
+      // 校区生产差距课时 = 生产指标（对应 G 档）− 整月已预排总数据
       const gapG1 = state.C - campusSched;
       const gapG2 = state.C * 1.10 - campusSched;
       const gapG3 = state.C * 1.25 - campusSched;
