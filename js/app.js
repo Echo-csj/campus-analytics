@@ -949,6 +949,19 @@
       return (typeof v === 'number' && isFinite(v)) ? v : null;
     }
     function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
+    function actualSummary(py, pm) {
+      const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
+      let latest = 0, campusActual = 0;
+      actuals.forEach(r => {
+        const w = +r.week || 0;
+        const p = num(r.values && r.values.produced);
+        if (w > latest) latest = w;
+      });
+      if (latest > 0) {
+        actuals.forEach(r => { if ((+r.week || 0) <= latest) campusActual += num(r.values && r.values.produced); });
+      }
+      return { latest, campusActual };
+    }
 
     const months = kezuMonths();
     const state = { C: loadTargetC(1000), year: 2026, month: 7 };
@@ -997,13 +1010,22 @@
         : achieved === 'G1' ? '<span class="tag ok">G1（100%）</span>'
         : '<span class="tag warn">未达标</span>';
 
+      const { latest: actLatest, campusActual } = actualSummary(pm.year, pm.month);
+      const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
+      const gapG1 = state.C - campusActual;
+      const gapG2 = state.C * 1.10 - campusActual;
+      const gapG3 = state.C * 1.25 - campusActual;
+      const gapText = v => v <= 0 ? '<span class="tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>';
+
       let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区预测总盘</div><div class="v">' + fmt(sumFinal) + '</div></div>' +
-        '<div class="stat-card"><div class="k">月度完成率</div><div class="v" style="color:var(--indigo)">' + pct(completion) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
         '<div class="stat-card"><div class="k">达到级别</div><div class="v">' + levelBadge + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区总单科 S</div><div class="v">' + fmt(S) + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区总课时 H</div><div class="v">' + fmt(H) + '</div></div>' +
+        '<div class="stat-card"><div class="k">第' + (actLatest || '—') + '周完成率</div><div class="v" style="color:var(--indigo)">' + (actLatest > 0 ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
         '</div>';
 
       h += '<div class="section-h">科组生产指标最终预测结果（' + pm.year + ' 年 ' + pm.month + ' 月）</div>';
