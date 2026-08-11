@@ -1131,11 +1131,13 @@
         // 仅呈现「二、季度排名」与「三、全年累计排名」两块，剔除 Q1–Q4/全年 评分明细，避免信息过密、Q2 之后显示不全
         const rankBlocks = rating.blocks.filter(b => b.title && /排名/.test(b.title));
         if (rankBlocks.length) {
-          rankBlocks.forEach(b => {
+          const cnNums = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+          rankBlocks.forEach((b, idx) => {
             const canRank = b.header.filter(hh => /总分/.test(hh)).length === 1 && !b.header.some(hh => /名次/.test(hh));
             const totCol = b.header.findIndex(hh => /总分/.test(hh));
             const usable = totCol >= 0 ? b.rows.some(r => isNum(r[totCol]) && +r[totCol] > 0) : b.rows.some(r => r[1] != null && r[1] !== '' && isNum(r[1]));
-            h += '<div class="sub-h">' + esc(b.title || '') + '</div>';
+            const blockTitle = (b.title || '').replace(/^[一二三四五六七八九十]、/, cnNums[idx + 1] + '、');
+            h += '<div class="sub-h">' + esc(blockTitle) + '</div>';
             if (!b.rows.length || !usable) h += '<div class="preview-note">（该排名暂无数据）</div>';
             else h += kezuScoreBlockHTML(b, canRank);
           });
