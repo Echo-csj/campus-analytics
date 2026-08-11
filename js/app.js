@@ -1128,15 +1128,20 @@
       const banner = kezuBestBanner(rating);
       if (banner) h += banner;
       if (rating && rating.blocks && rating.blocks.length) {
-        h += '<div class="section-h">最佳科组 · 季度与全年排名</div>';
-        rating.blocks.forEach(b => {
-          const canRank = b.header.filter(hh => /总分/.test(hh)).length === 1 && !b.header.some(hh => /名次/.test(hh));
-          const totCol = b.header.findIndex(hh => /总分/.test(hh));
-          const usable = totCol >= 0 ? b.rows.some(r => isNum(r[totCol]) && +r[totCol] > 0) : b.rows.some(r => r[1] != null && r[1] !== '' && isNum(r[1]));
-          h += '<div class="sub-h">' + esc(b.title || '') + '</div>';
-          if (!b.rows.length || !usable) h += '<div class="preview-note">（该季度/年度暂无评分数据）</div>';
-          else h += kezuScoreBlockHTML(b, canRank);
-        });
+        // 仅呈现「二、季度排名」与「三、全年累计排名」两块，剔除 Q1–Q4/全年 评分明细，避免信息过密、Q2 之后显示不全
+        const rankBlocks = rating.blocks.filter(b => b.title && /排名/.test(b.title));
+        if (rankBlocks.length) {
+          rankBlocks.forEach(b => {
+            const canRank = b.header.filter(hh => /总分/.test(hh)).length === 1 && !b.header.some(hh => /名次/.test(hh));
+            const totCol = b.header.findIndex(hh => /总分/.test(hh));
+            const usable = totCol >= 0 ? b.rows.some(r => isNum(r[totCol]) && +r[totCol] > 0) : b.rows.some(r => r[1] != null && r[1] !== '' && isNum(r[1]));
+            h += '<div class="sub-h">' + esc(b.title || '') + '</div>';
+            if (!b.rows.length || !usable) h += '<div class="preview-note">（该排名暂无数据）</div>';
+            else h += kezuScoreBlockHTML(b, canRank);
+          });
+        } else {
+          h += '<div class="empty">该年评比数据中暂无排名信息。</div>';
+        }
       } else {
         h += '<div class="empty">该年评比数据中暂无排名信息。</div>';
       }
