@@ -1327,7 +1327,7 @@
   // 1) A 法：单科占比 × 校区生产指标
   // 2) B 法：上月课时占比 × 校区生产指标（并对比数据源 1v1 月生产课时）
   // 3) 两次预测求均值
-  // 4) 预测周平均 = 均值 / 单科；取四科组周平均均值，区间控制 [C, C+30] 反推对齐
+  // 4) 预测周平均 = 均值 / 单科 / 月周数（周数取自最佳科组）；取四科组均值，区间控制 [C, C+30] 反推对齐
   // 5) 完成率 = 四科组预测之和 / C；G1=100% G2=110% G3=125%，倒推各档指标
   // 6) 周度预测 = 月预测 / 周数；呈现周度 / 月度 / 完成率 / 达到级别
   // 7) 校区汇总
@@ -1337,25 +1337,29 @@
     const S = depts.reduce((a, d) => a + (d.s || 0), 0);
     const H = depts.reduce((a, d) => a + (d.h || 0), 0);
     const rows = depts.map(d => {
+      const w = d.w > 0 ? d.w : 4;             // 月周数（缺失按 4 周兜底，与看板一致）；可在最佳科组提取
       const a = S > 0 ? d.s / S : 0;          // A 法占比（单科占比）
       const b = H > 0 ? d.h / H : 0;          // B 法占比（课时占比）
       const predA = a * C;
       const predB = b * C;
-      const avg = (predA + predB) / 2;         // ③ 两步均值
-      const wAvg = d.s > 0 ? avg / d.s : 0;    // ④ 预测周平均
-      return { name: d.name, s: d.s, h: d.h, w: d.w, a, b, predA, predB, avg, wAvg };
+      const avg = (predA + predB) / 2;         // ③ 两步均值（预测课时数）
+      // ④ 预测周平均 = 对应课时数 / 对应单科数 / 对应月周数
+      const wAvg = d.s > 0 ? avg / d.s / w : 0;
+      return { name: d.name, s: d.s, h: d.h, w, a, b, predA, predB, avg, wAvg };
     });
+    // 分母 = Σ(单科数 × 月周数)；周数相同时退化为 Σ单科数
+    const denom = rows.reduce((a, r) => a + (r.s || 0) * r.w, 0);
     const meanW = rows.reduce((x, r) => x + r.wAvg, 0) / (rows.length || 1);
-    const sum0 = meanW * S;
-    const lower = S > 0 ? C / S : 0;
-    const upper = S > 0 ? (C + 30) / S : 0;
+    const sum0 = meanW * denom;
+    const lower = denom > 0 ? C / denom : 0;
+    const upper = denom > 0 ? (C + 30) / denom : 0;
     let commonW = meanW;
     let adjNote;
-    if (S <= 0) adjNote = '单科数合计为 0，无法计算。';
+    if (denom <= 0) adjNote = '单科数×周数合计为 0，无法计算。';
     else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
     else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
     else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
-    const sumFinal = commonW * S;
+    const sumFinal = commonW * denom;
     const completion = C > 0 ? sumFinal / C : 0;
     let achieved = '未达标';
     if (completion >= 1.25) achieved = 'G3';
@@ -1363,11 +1367,12 @@
     else if (completion >= 1.00) achieved = 'G1';
     const Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
     rows.forEach(r => {
-      r.final = commonW * r.s;
-      r.weekly = r.w > 0 ? r.final / r.w : 0;
-      r.G1 = (C * Gcfg.G1) * (r.s / (S || 1));
-      r.G2 = (C * Gcfg.G2) * (r.s / (S || 1));
-      r.G3 = (C * Gcfg.G3) * (r.s / (S || 1));
+      r.final = commonW * r.s * r.w;          // 最终月度预测 = 共同周平均 × 单科 × 周数
+      r.weekly = r.w > 0 ? r.final / r.w : 0; // 周度生产预测 = 月度预测 / 周数
+      const share = (r.s * r.w) / (denom || 1); // 按 单科×周数 分配（周数相同即按单科）
+      r.G1 = (C * Gcfg.G1) * share;
+      r.G2 = (C * Gcfg.G2) * share;
+      r.G3 = (C * Gcfg.G3) * share;
     });
     return { S, H, rows, meanW, sum0, lower, upper, commonW, adjNote, sumFinal, completion, achieved, Gcfg };
   }
@@ -1434,7 +1439,7 @@
 
       <div class="panel">
         <div class="panel-title">③ ＋ ④ 预测周平均 · 对齐 · 区间控制</div>
-        <div class="panel-desc">预测周平均ᵢ = 两步均值ᵢ / 单科ᵢ；取四科组预测周平均之均值作为「共同周平均」，最终月度预测ᵢ = 共同周平均 × 单科ᵢ。四科组预测之和须落在区间 [C, C+30]：不足则上调共同周平均直至达到 C；超出 +30 则压回。</div>
+        <div class="panel-desc">预测周平均ᵢ = 两步均值ᵢ / 单科ᵢ / 月周数ᵢ（月周数取自最佳科组）；取四科组预测周平均之均值作为「共同周平均」，最终月度预测ᵢ = 共同周平均 × 单科ᵢ × 月周数ᵢ。四科组预测之和须落在区间 [C, C+30]：不足则上调共同周平均直至达到 C；超出 +30 则压回。</div>
         <div id="tAlignWrap"></div>
       </div>
 
@@ -1446,7 +1451,7 @@
 
       <div class="panel">
         <div class="panel-title">⑥ 最终预测结果（周度 / 月度 / 完成率 / 达到级别）</div>
-        <div class="panel-desc">周度生产预测ᵢ = 月度预测ᵢ / 该科组周数（按周均摊）。月度完成率与达到级别为校区级口径（因分配 ∝ 单科数，各组的完成率一致）。</div>
+        <div class="panel-desc">周度生产预测ᵢ = 月度预测ᵢ / 该科组周数（按周均摊）。月度完成率与达到级别为校区级口径（分配 ∝ 单科数×周数；同月周数相同即 ∝ 单科数，各组完成率一致）。</div>
         <div id="tFinalWrap"></div>
         <div class="panel-subtitle" style="margin-top:16px">每周分解（按周均摊）</div>
         <div id="tWeeklyWrap"></div>
@@ -1554,7 +1559,7 @@
       ah += '<div class="preview-note" style="margin-bottom:8px">' + adjNote + '</div>';
       ah += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">预测周平均</th><th class="num">共同周平均</th><th class="num">最终月度预测</th></tr></thead><tbody>';
       rows.forEach(r => {
-        const final_i = commonW * r.s;
+        const final_i = r.final;
         ah += '<tr><td>' + esc(r.name) + '</td>' +
           '<td class="num">' + fmt(r.wAvg, 2) + '</td>' +
           '<td class="num" style="color:var(--green);font-weight:600">' + fmt(commonW, 2) + '</td>' +
