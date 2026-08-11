@@ -921,7 +921,7 @@
   function renderDashboard() {
     let html = '<div class="panel"><div class="panel-title">核心数据看板</div>';
     html += '<div class="panel-desc">基于《年度数据统计标准》和《季度数据统计标准》汇总，以仪表盘形式直观呈现年度核心指标和各季度对比趋势。数据源为各月「月度周报」。</div>';
-    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button></div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button><button class="dash-tab" data-sub="kezu">最佳科组排名</button></div>';
     html += '<div id="dashBody"></div></div>';
     $('#content').innerHTML = html;
     $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
@@ -929,6 +929,7 @@
       b.classList.add('active');
       if (b.dataset.sub === 'year') renderYearDashboard();
       else if (b.dataset.sub === 'quarter') renderQuarterDashboard();
+      else if (b.dataset.sub === 'kezu') renderKezuRankDashboard();
       else renderSatDashboard();
     }));
     renderYearDashboard();
@@ -1085,6 +1086,47 @@
       sel.addEventListener('change', drawCmp);
       drawCmp();
     }
+  }
+
+  // —— 核心看板 · 最佳科组排名（基于季度评比数据）——
+  function renderKezuRankDashboard() {
+    const recs = STORE.list('bestkezu_score');
+    if (!recs.length) {
+      $('#dashBody').innerHTML = '<div class="empty">暂无最佳科组评比数据。请先在「最佳科组」模块上传含『最佳科组评比汇总』(Sheet5) 的全量文件并入库，即可在此查看各季度与全年排名。</div>';
+      return;
+    }
+    const years = recs.map(r => r.year).filter(y => y).sort((a, b) => b - a);
+    const yr = years[0];
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="kezuRankYr">' +
+      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
+      '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>';
+    html += '<div id="kezuRankResult"></div>';
+    $('#dashBody').innerHTML = html;
+    $('#kezuRankYr').addEventListener('change', draw);
+    function draw() {
+      const y = parseInt($('#kezuRankYr').value, 10);
+      const rec = recs.find(r => r.year === y) || recs[0];
+      const score = rec.values || {};
+      const rating = score.rating;
+      let h = '';
+      const banner = kezuBestBanner(rating);
+      if (banner) h += banner;
+      if (rating && rating.blocks && rating.blocks.length) {
+        h += '<div class="section-h">最佳科组 · 季度与全年排名</div>';
+        rating.blocks.forEach(b => {
+          const canRank = b.header.filter(hh => /总分/.test(hh)).length === 1 && !b.header.some(hh => /名次/.test(hh));
+          const totCol = b.header.findIndex(hh => /总分/.test(hh));
+          const usable = totCol >= 0 ? b.rows.some(r => isNum(r[totCol]) && +r[totCol] > 0) : b.rows.some(r => r[1] != null && r[1] !== '' && isNum(r[1]));
+          h += '<div class="sub-h">' + esc(b.title || '') + '</div>';
+          if (!b.rows.length || !usable) h += '<div class="preview-note">（该季度/年度暂无评分数据）</div>';
+          else h += kezuScoreBlockHTML(b, canRank);
+        });
+      } else {
+        h += '<div class="empty">该年评比数据中暂无排名信息。</div>';
+      }
+      $('#kezuRankResult').innerHTML = h;
+    }
+    draw();
   }
 
 
