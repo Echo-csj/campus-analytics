@@ -266,7 +266,11 @@
     if (!cells.length) return false;
     // 整行皆为数字（如预留的全 0 行）→ 视为数据，不是标题
     if (cells.every(c => /^[-\d.]+$/.test(c))) return false;
-    if (cells.length === 1) return true;
+    if (cells.length === 1) {
+      // 单个单元格：若是已知科组名（如 Q2 的「数学」空行），属数据行占位而非标题
+      if (SUBJECTS.indexOf(cells[0]) >= 0) return false;
+      return true;
+    }
     if (cells.every(c => c === cells[0])) return true; // 合并单元格展开的整行标题
     const f = cells[0];
     if (/^[一二三四五六]、/.test(f)) return true;       // 一、按科组（全年）
