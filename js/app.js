@@ -920,10 +920,139 @@
     return '<div class="gauge-card">' + ring + '<div class="gc-body"><div class="gc-k">' + label + '</div><div class="gc-v">' + v + u + '</div></div></div>';
   }
 
+  // 核心看板子页：科组生产预测（用已完成月数据，预测下月指标）
+  function renderKezuTargetDash() {
+    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
+    function kezuMonths() {
+      const set = {};
+      STORE.list('bestkezu').forEach(r => { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
+      return Object.values(set).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    }
+    function loadMonth(y, m) {
+      const recs = STORE.list('bestkezu').filter(r => r.year === y && r.month === m);
+      if (!recs.length) return null;
+      return recs.map(r => { const v = r.values || {}; return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 }; });
+    }
+    function dataSourceProd(y, m) {
+      const me = AGG.monthEndWeeklies(STORE.list('weekly'));
+      const rec = me.find(r => r.year === y && r.month === m);
+      if (!rec) return null;
+      const v = rec.values && rec.values.v1MonthProduced;
+      return (typeof v === 'number' && isFinite(v)) ? v : null;
+    }
+    function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
+
+    const months = kezuMonths();
+    const state = { C: 1000, year: 2026, month: 7 };
+    if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
+
+    $('#dashBody').innerHTML =
+      '<div class="panel"><div class="panel-title">科组生产预测（下月指标）</div>' +
+      '<div class="panel-desc">底层逻辑：用<b>已完成月份</b>（参考月份）的最佳科组数据，预测<b>下个月</b>（预测月份）的生产指标。月度数据完成后，在此输入校区生产指标即可一键获得各科的预测下达值。</div>' +
+      '<div class="grid grid-3" style="margin-bottom:10px">' +
+        '<div class="field"><label>校区生产指标（总盘 C）</label><input type="number" id="dtC" class="mono" min="0" step="any" value="' + state.C + '"></div>' +
+        '<div class="field"><label>参考月份（已完成月）</label><select id="dtMonthSel" class="mono"></select></div>' +
+        '<div class="field"><label>预测月份</label><input type="text" id="dtPred" class="mono" readonly></div>' +
+      '</div>' +
+      '<div id="dtConsist" class="field-note"></div>' +
+      '<div id="dtResult"></div></div>';
+
+    function fillMonths() {
+      const ys = [...new Set(months.map(m => m.year))];
+      if (!ys.includes(state.year) && ys.length) state.year = ys[ys.length - 1];
+      const ms = months.filter(m => m.year === state.year).map(m => m.month);
+      if (!ms.includes(state.month) && ms.length) state.month = ms[ms.length - 1];
+      $('#dtMonthSel').innerHTML = months.map(m => '<option value="' + m.year + '-' + m.month + '"' + (m.year === state.year && m.month === state.month ? ' selected' : '') + '>' + m.year + ' 年 ' + m.month + ' 月</option>').join('');
+    }
+
+    function draw() {
+      const depts = loadMonth(state.year, state.month);
+      if (!depts) {
+        $('#dtPred').value = '';
+        $('#dtConsist').innerHTML = '';
+        $('#dtResult').innerHTML = '<div class="empty">「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据，无法预测。请先在「最佳科组」模块上传该月数据，或切换到有数据的参考月份。</div>';
+        return;
+      }
+      const pm = predMonth(state.year, state.month);
+      $('#dtPred').value = pm.year + ' 年 ' + pm.month + ' 月';
+      const res = computeKezuTarget(depts, state.C);
+      const { S, H, rows, commonW, sumFinal, completion, achieved, Gcfg } = res;
+
+      const src = dataSourceProd(state.year, state.month);
+      let consistHtml;
+      if (src == null) consistHtml = '<span class="tag warn">数据源无该月周报</span> <span class="preview-note">「1v1 月生产课时」校验需上传该月 DOS 周报。</span>';
+      else { const diff = H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
+      $('#dtConsist').innerHTML = consistHtml;
+
+      const levelBadge = achieved === 'G3' ? '<span class="tag" style="background:#4F46E5;color:#fff">G3（125%）</span>'
+        : achieved === 'G2' ? '<span class="tag warn">G2（110%）</span>'
+        : achieved === 'G1' ? '<span class="tag ok">G1（100%）</span>'
+        : '<span class="tag warn">未达标</span>';
+
+      let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
+        '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区预测总盘</div><div class="v">' + fmt(sumFinal) + '</div></div>' +
+        '<div class="stat-card"><div class="k">月度完成率</div><div class="v" style="color:var(--indigo)">' + pct(completion) + '</div></div>' +
+        '<div class="stat-card"><div class="k">达到级别</div><div class="v">' + levelBadge + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区总单科 S</div><div class="v">' + fmt(S) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区总课时 H</div><div class="v">' + fmt(H) + '</div></div>' +
+        '</div>';
+
+      h += '<div class="section-h">科组生产指标最终预测结果（' + pm.year + ' 年 ' + pm.month + ' 月）</div>';
+      h += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">周度生产预测</th><th class="num">月度生产预测</th><th class="num">月度完成率</th><th class="num">达到级别</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        h += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.s) + '</td>' +
+          '<td class="num">' + fmt(r.weekly, 1) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(r.final) + '</td>' +
+          '<td class="num">' + pct(completion) + '</td>' +
+          '<td class="num">' + levelBadge + '</td></tr>';
+      });
+      const sumWeeklyFinal = rows.reduce((a, r) => a + r.weekly, 0);
+      h += '</tbody>';
+      h += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">' + fmt(S) + '</td>' +
+        '<td class="num">' + fmt(sumWeeklyFinal, 1) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(sumFinal) + '</td>' +
+        '<td class="num">' + pct(completion) + '</td>' +
+        '<td class="num">' + levelBadge + '</td></tr></tfoot>';
+      h += '</table></div>';
+
+      const maxW = Math.max(...rows.map(r => r.w), 0);
+      if (maxW > 0) {
+        h += '<div class="section-h" style="margin-top:16px">每周分解（按周均摊）</div>';
+        h += '<div class="table-wrap"><table><thead><tr><th>科组</th>';
+        for (let i = 1; i <= maxW; i++) h += '<th class="num">第' + i + '周</th>';
+        h += '</tr></thead><tbody>';
+        rows.forEach(r => {
+          h += '<td>' + esc(r.name) + '</td>';
+          for (let i = 1; i <= maxW; i++) h += '<td class="num">' + (i <= r.w ? fmt(r.weekly, 1) : '<span class="muted">—</span>') + '</td>';
+          h += '</tr>';
+        });
+        const wkTotals = [];
+        for (let i = 1; i <= maxW; i++) { let t = 0; rows.forEach(r => { if (i <= r.w) t += r.weekly; }); wkTotals.push(t); }
+        h += '</tbody>';
+        h += '<tfoot><tr><td class="total-label">校区总计</td>';
+        for (let i = 1; i <= maxW; i++) h += '<td class="num">' + fmt(wkTotals[i - 1], 1) + '</td>';
+        h += '</tr></tfoot>';
+        h += '</table></div>';
+      }
+
+      h += '<div class="preview-note" style="margin-top:12px">G 档目标（按单科占比倒推，校区总盘口径）：G1 = ' + fmt(state.C * Gcfg.G1) + '、G2 = ' + fmt(state.C * Gcfg.G2) + '、G3 = ' + fmt(state.C * Gcfg.G3) + '。</div>';
+      $('#dtResult').innerHTML = h;
+    }
+
+    fillMonths();
+    draw();
+
+    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; draw(); });
+    $('#dtMonthSel').addEventListener('change', e => { const p = e.target.value.split('-'); state.year = +p[0]; state.month = +p[1]; draw(); });
+  }
+
   function renderDashboard() {
     let html = '<div class="panel"><div class="panel-title">核心数据看板</div>';
     html += '<div class="panel-desc">基于《年度数据统计标准》和《季度数据统计标准》汇总，以仪表盘形式直观呈现年度核心指标和各季度对比趋势。数据源为各月「月度周报」。</div>';
-    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button><button class="dash-tab" data-sub="kezu">最佳科组排名</button></div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button><button class="dash-tab" data-sub="kezu">最佳科组排名</button><button class="dash-tab" data-sub="target">科组生产预测</button></div>';
     html += '<div id="dashBody"></div></div>';
     $('#content').innerHTML = html;
     $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
@@ -932,6 +1061,7 @@
       if (b.dataset.sub === 'year') renderYearDashboard();
       else if (b.dataset.sub === 'quarter') renderQuarterDashboard();
       else if (b.dataset.sub === 'kezu') renderKezuRankDashboard();
+      else if (b.dataset.sub === 'target') renderKezuTargetDash();
       else renderSatDashboard();
     }));
     renderYearDashboard();
@@ -1201,6 +1331,47 @@
   // 5) 完成率 = 四科组预测之和 / C；G1=100% G2=110% G3=125%，倒推各档指标
   // 6) 周度预测 = 月预测 / 周数；呈现周度 / 月度 / 完成率 / 达到级别
   // 7) 校区汇总
+
+  // 科组生产指标核心算法（「科组生产指标」tab 与「核心看板·科组生产预测」共用）
+  function computeKezuTarget(depts, C) {
+    const S = depts.reduce((a, d) => a + (d.s || 0), 0);
+    const H = depts.reduce((a, d) => a + (d.h || 0), 0);
+    const rows = depts.map(d => {
+      const a = S > 0 ? d.s / S : 0;          // A 法占比（单科占比）
+      const b = H > 0 ? d.h / H : 0;          // B 法占比（课时占比）
+      const predA = a * C;
+      const predB = b * C;
+      const avg = (predA + predB) / 2;         // ③ 两步均值
+      const wAvg = d.s > 0 ? avg / d.s : 0;    // ④ 预测周平均
+      return { name: d.name, s: d.s, h: d.h, w: d.w, a, b, predA, predB, avg, wAvg };
+    });
+    const meanW = rows.reduce((x, r) => x + r.wAvg, 0) / (rows.length || 1);
+    const sum0 = meanW * S;
+    const lower = S > 0 ? C / S : 0;
+    const upper = S > 0 ? (C + 30) / S : 0;
+    let commonW = meanW;
+    let adjNote;
+    if (S <= 0) adjNote = '单科数合计为 0，无法计算。';
+    else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
+    else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
+    else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
+    const sumFinal = commonW * S;
+    const completion = C > 0 ? sumFinal / C : 0;
+    let achieved = '未达标';
+    if (completion >= 1.25) achieved = 'G3';
+    else if (completion >= 1.10) achieved = 'G2';
+    else if (completion >= 1.00) achieved = 'G1';
+    const Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
+    rows.forEach(r => {
+      r.final = commonW * r.s;
+      r.weekly = r.w > 0 ? r.final / r.w : 0;
+      r.G1 = (C * Gcfg.G1) * (r.s / (S || 1));
+      r.G2 = (C * Gcfg.G2) * (r.s / (S || 1));
+      r.G3 = (C * Gcfg.G3) * (r.s / (S || 1));
+    });
+    return { S, H, rows, meanW, sum0, lower, upper, commonW, adjNote, sumFinal, completion, achieved, Gcfg };
+  }
+
   function renderTarget() {
     const state = { C: 1000, year: 2026, month: 7, depts: [] };
     let calc = null;
@@ -1329,8 +1500,8 @@
 
     function recompute() {
       const C = state.C;
-      const S = state.depts.reduce((a, d) => a + (d.s || 0), 0);
-      const H = state.depts.reduce((a, d) => a + (d.h || 0), 0);
+      const res = computeKezuTarget(state.depts, C);
+      const S = res.S, H = res.H, rows = res.rows;
       const src = dataSourceProd(state.year, state.month);
 
       // 数据源一致性校验（步骤②）
@@ -1348,16 +1519,6 @@
       $('#tConsist').innerHTML = consistHtml;
 
       // ① + ② 两步预测
-      const rows = state.depts.map(d => {
-        const a = S > 0 ? d.s / S : 0;        // A 法占比
-        const b = H > 0 ? d.h / H : 0;        // B 法占比
-        const predA = a * C;
-        const predB = b * C;
-        const avg = (predA + predB) / 2;       // ③ 均值
-        const wAvg = d.s > 0 ? avg / d.s : 0;  // ④ 预测周平均
-        return { name: d.name, s: d.s, h: d.h, w: d.w, a, b, predA, predB, avg, wAvg };
-      });
-
       let ch = '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">A 法占比</th><th class="num">A 法预测</th><th class="num">课时</th><th class="num">B 法占比</th><th class="num">B 法预测</th><th class="num">两步均值</th></tr></thead><tbody>';
       rows.forEach(r => {
         ch += '<tr><td>' + esc(r.name) + '</td>' +
@@ -1382,18 +1543,7 @@
       $('#tCalcWrap').innerHTML = ch;
 
       // ④ 对齐与区间控制
-      const meanW = rows.reduce((a, r) => a + r.wAvg, 0) / (rows.length || 1);
-      const sum0 = meanW * S;
-      const lower = S > 0 ? C / S : 0;
-      const upper = S > 0 ? (C + 30) / S : 0;
-      let commonW = meanW;
-      let adjNote;
-      if (S <= 0) { adjNote = '单科数合计为 0，无法计算。'; }
-      else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
-      else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
-      else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
-
-      const sumFinal = commonW * S;
+      const meanW = res.meanW, sum0 = res.sum0, commonW = res.commonW, adjNote = res.adjNote, sumFinal = res.sumFinal;
 
       let ah = '<div class="stat-grid" style="margin-bottom:10px">' +
         '<div class="stat-card"><div class="k">四科组预测周平均均值</div><div class="v">' + fmt(meanW, 2) + '</div></div>' +
@@ -1419,19 +1569,7 @@
       $('#tAlignWrap').innerHTML = ah;
 
       // ⑤ G 档倒推 + 完成率 / 达到级别
-      const completion = C > 0 ? sumFinal / C : 0;
-      let achieved = '未达标';
-      if (completion >= 1.25) achieved = 'G3';
-      else if (completion >= 1.10) achieved = 'G2';
-      else if (completion >= 1.00) achieved = 'G1';
-      const Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
-      rows.forEach(r => {
-        r.final = commonW * r.s;
-        r.weekly = r.w > 0 ? r.final / r.w : 0;
-        r.G1 = (C * Gcfg.G1) * (r.s / (S || 1));
-        r.G2 = (C * Gcfg.G2) * (r.s / (S || 1));
-        r.G3 = (C * Gcfg.G3) * (r.s / (S || 1));
-      });
+      const completion = res.completion, achieved = res.achieved, Gcfg = res.Gcfg;
 
       let gh = '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">G1 指标（100%）</th><th class="num">G2 指标（110%）</th><th class="num">G3 指标（125%）</th></tr></thead><tbody>';
       rows.forEach(r => {
