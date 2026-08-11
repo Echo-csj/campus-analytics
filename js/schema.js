@@ -168,7 +168,6 @@
   CA.SCHEMA = {
     weeklyFields, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
     kezuFields, kpiFields,
-    streams: ['weekly', 'kezu', 'kpi'],
   };
 
 })(window);

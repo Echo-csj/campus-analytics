@@ -6,7 +6,7 @@
 (function (global) {
   'use strict';
   const CA = global.CA;
-  const SCHEMA = CA.SCHEMA, RB = CA.rulebook, STORE = CA.store, PARSER = CA.parser, AGG = CA.aggregate;
+  const SCHEMA = CA.SCHEMA, STORE = CA.store, PARSER = CA.parser, AGG = CA.aggregate;
 
   let currentTab = 'weekly';
   let pending = null; // 待确认入库的解析结果
@@ -933,28 +933,10 @@
   // 规则：自然月最后一天若在周一/周二 -> 该周归新月份(本月止于上一周日)；
   //       若在周三及之后 -> 该周归本月(止于本周日)。周日即月度最后一天。
   // 人工月最后一天（自然周周日）：自然月最后一天若在当周周二及之前则归上月，周三及之后归本月
-  function manualLastDay(Y, m) {
-    const L = new Date(Y, m, 0); // 自然月最后一天
-    const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
-    if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
-    return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
-  }
   function currentManualWeek(date) {
-    function manualMonthOf(d) {
-      let Y = d.getFullYear(), m = d.getMonth() + 1;
-      const ML = manualLastDay(Y, m);
-      if (d <= ML) {
-        let pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
-        const prevML = manualLastDay(pY, pm0);
-        if (d > prevML) return { year: Y, month: m };
-        return { year: pY, month: pm0 };
-      }
-      let nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
-      return { year: nY, month: nm };
-    }
-    const mm = manualMonthOf(date);
+    const mm = AGG.manualMonthOf(date);
     let pY = mm.year, pm0 = mm.month - 1; if (pm0 < 1) { pm0 = 12; pY = mm.year - 1; }
-    const prevML = manualLastDay(pY, pm0);
+    const prevML = AGG.manualLastDay(pY, pm0);
     const MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1); // 人工月首周一
     const dayDiff = Math.round((date - MS) / 86400000);
     return { year: mm.year, month: mm.month, week: Math.floor(dayDiff / 7) + 1 };
@@ -1056,7 +1038,7 @@
         // 今天落在本预测月内：未到周日则本周未完成，取上一周
         reportWeek = (today.getDay() === 0) ? cw.week : Math.max(1, cw.week - 1);
       } else {
-        const pmEnd = manualLastDay(pm.year, pm.month);
+        const pmEnd = AGG.manualLastDay(pm.year, pm.month);
         if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week; // 预测月已结束→全部周完成
       }
       // 完成率：按已完成周实产；差距课时：固定减去「整月已预排」（不再随日期按已完成周漂移）

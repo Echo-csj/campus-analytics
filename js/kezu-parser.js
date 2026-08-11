@@ -251,7 +251,6 @@
 
   // —— 评比相关 sheet 解析（Sheet3 全年汇总透视 / Sheet4 季度考试数据 / Sheet5 最佳科组评比汇总）——
   // 这些表是源文件中已计算好的派生/评比视图，工作台原样呈现即可（含评分排名）。
-  const SCORE_SHEET_NAMES = ['全年汇总透视', '季度考试数据', '最佳科组评比汇总'];
 
   function isScoreHeader(row) {
     if (!row) return false;
@@ -399,6 +398,4 @@
   CA.BESTKEZU.parseMatrix = parseMatrix;
   CA.BESTKEZU.parseFile = parseFile;
   CA.BESTKEZU.parseScoreSheets = parseScoreSheets;
-  CA.BESTKEZU.toNum = toNum;
-  CA.BESTKEZU.matchField = matchField;
 })(typeof window !== 'undefined' ? window : global);

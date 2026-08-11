@@ -170,31 +170,6 @@
     return { columns, rows };
   }
 
-  // 最佳科组：月度自动汇总（按 年-月-科组）
-  // 课时/结课/退费/停课/续费/推荐 = 流量（各周累加）；单科数/教师数/离职/进步率 = 存量（取月末周快照）
-  // 月周平均 = (Σ周课时 / 当月周数) / 单科数快照  ← 对齐 PK-最佳科组细则（周平均=月课时/(单科数×周数)）
-  const ADD_FIELDS = ['hours', 'jkSubj', 'tfSubj', 'tkSubj', 'xfSubj', 'tjSubj'];
-  const SNAP_FIELDS = ['subjects', 'teacherCount', 'quitCount', 'progressRate'];
-  function kezuMonthly(kezuRecs) {
-    const groups = {};
-    kezuRecs.forEach(r => {
-      const k = r.year + '-' + r.month + '-' + r.dimension;
-      if (!groups[k]) groups[k] = { year: r.year, month: r.month, dimension: r.dimension, _weeks: [] };
-      groups[k]._weeks.push(r);
-    });
-    return Object.values(groups).map(g => {
-      const v = {};
-      const weekCount = g._weeks.length;
-      ADD_FIELDS.forEach(f => v[f] = g._weeks.reduce((s, r) => s + (r.values[f] || 0), 0));
-      SNAP_FIELDS.forEach(f => {
-        const last = [...g._weeks].reverse().find(r => r.values[f] != null);
-        v[f] = last ? last.values[f] : null;
-      });
-      v.weekAvg = (v.subjects && weekCount) ? (v.hours / weekCount) / v.subjects : 0;
-      return { year: g.year, month: g.month, dimension: g.dimension, values: v };
-    });
-  }
-
   // 教师 KPI：月度汇总（按 年-月-教师）
   function kpiMonthly(kpiRecs) {
     const groups = {};
@@ -495,7 +470,7 @@
 
   CA.aggregate = {
     withMonthEnd, monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
-    kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
+    manualLastDay, manualMonthOf, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate, evalExpr, normalizeRatio,
     YEARLY_RULES, yearlyAggregate,
   };
