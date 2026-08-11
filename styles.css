@@ -314,3 +314,19 @@ tr.winner td:first-child { font-weight: 700; color: var(--indigo); }
 .badge-best { display: inline-block; font-size: 11px; font-weight: 700; line-height: 1; padding: 3px 7px; border-radius: 999px; background: var(--indigo); color: #fff; vertical-align: 1px; }
 .bk-best-banner { display: flex; align-items: center; gap: 10px; background: linear-gradient(90deg, #eef2ff, #fafaff); border: 1px solid #c7d2fe; border-radius: var(--radius); padding: 14px 16px; margin-bottom: 16px; font-size: 14px; color: var(--text); }
 .bk-best-banner b { font-size: 16px; color: var(--indigo); }
+
+/* —— 生产指标下达计算器 —— */
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.seg { display: inline-flex; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 3px; gap: 3px; }
+.seg button { border: none; background: transparent; color: var(--text-2); padding: 6px 13px; border-radius: 5px; cursor: pointer; font-size: 13px; font-family: inherit; font-weight: 500; transition: all .15s ease; }
+.seg button.active { background: var(--bg); color: var(--text); box-shadow: var(--shadow); font-weight: 600; }
+.cell-in { width: 100%; min-width: 0; border: 1px solid transparent; background: transparent; color: var(--text); border-radius: 5px; padding: 6px 8px; font-size: 13px; font-family: inherit; transition: border-color .15s ease, box-shadow .15s ease; }
+.cell-in:hover { border-color: var(--border); }
+.cell-in:focus { outline: none; border-color: var(--indigo); background: var(--bg); box-shadow: 0 0 0 3px var(--indigo-soft); }
+.cell-in.mono { font-family: var(--mono); text-align: right; }
+.row-del { border: none; background: transparent; color: var(--text-3); cursor: pointer; font-size: 17px; line-height: 1; padding: 4px 9px; border-radius: 5px; }
+.row-del:hover { color: var(--red); background: var(--bg-subtle); }
+.wbar { height: 6px; border-radius: 3px; background: var(--bg-subtle); overflow: hidden; margin-top: 8px; }
+.wbar > i { display: block; height: 100%; background: var(--indigo); border-radius: 3px; }
+.total-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 16px; background: var(--indigo-soft); border: 1px solid #c7d2fe; border-radius: var(--radius); margin-top: 12px; font-size: 13.5px; }
+.total-line .big { font-size: 17px; font-weight: 700; color: var(--indigo); font-family: var(--mono); }

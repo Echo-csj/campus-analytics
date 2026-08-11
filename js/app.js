@@ -1192,6 +1192,363 @@
     $('#clrData').addEventListener('click', () => { if (confirm('确定清空全部数据？不可恢复（请先导出备份）。')) { STORE.clearAll(); toast('已清空'); renderData(); updateCount(); } });
   }
 
+  // —— 生产指标下达（科组生产指标计算器）——
+  // 科组生产指标（7 步算法）
+  // 1) A 法：单科占比 × 校区生产指标
+  // 2) B 法：上月课时占比 × 校区生产指标（并对比数据源 1v1 月生产课时）
+  // 3) 两次预测求均值
+  // 4) 预测周平均 = 均值 / 单科；取四科组周平均均值，区间控制 [C, C+30] 反推对齐
+  // 5) 完成率 = 四科组预测之和 / C；G1=100% G2=110% G3=125%，倒推各档指标
+  // 6) 周度预测 = 月预测 / 周数；呈现周度 / 月度 / 完成率 / 达到级别
+  // 7) 校区汇总
+  function renderTarget() {
+    const state = { C: 1000, year: 2026, month: 7, depts: [] };
+    let calc = null;
+    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
+
+    // 最佳科组已入库的 (年,月) 列表（升序）
+    function kezuMonths() {
+      const set = {};
+      STORE.list('bestkezu').forEach(r => { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
+      return Object.values(set).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    }
+    // 读入指定年月的科组数据
+    function loadMonth(y, m) {
+      const recs = STORE.list('bestkezu').filter(r => r.year === y && r.month === m);
+      if (!recs.length) return null;
+      return recs.map(r => {
+        const v = r.values || {};
+        return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 };
+      });
+    }
+    // 数据源 1v1 月生产课时（来自 DOS 周报月度周报）
+    function dataSourceProd(y, m) {
+      const me = AGG.monthEndWeeklies(STORE.list('weekly'));
+      const rec = me.find(r => r.year === y && r.month === m);
+      if (!rec) return null;
+      const v = rec.values && rec.values.v1MonthProduced;
+      return (typeof v === 'number' && isFinite(v)) ? v : null;
+    }
+
+    let html = `
+      <div class="panel">
+        <div class="panel-title">参数设置与数据源校验</div>
+        <div class="panel-desc">① 校区生产指标（总盘 C）为人工输入；② 参考月份 = 取「最佳科组」中该月数据（即上月单科数 / 课时）；③ 系统自动用最佳科组课时合计数与数据源「1v1 月生产课时」做一致性校验。</div>
+        <div class="grid grid-3" style="margin-bottom:12px">
+          <div class="field"><label>校区生产指标（总盘 C）</label><input type="number" id="tC" class="mono" min="0" step="any" value="${state.C}"></div>
+          <div class="field"><label>参考年份</label><select id="tYearSel" class="mono"></select></div>
+          <div class="field"><label>参考月份（上月数据）</label><select id="tMonthSel" class="mono"></select></div>
+        </div>
+        <div id="tConsist" class="field-note"></div>
+        <div class="row" style="margin-top:10px">
+          <button class="btn" id="tLoad">↻ 读入该月科组数据</button>
+          <button class="btn ghost" id="tClear">清空科组</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">科组输入（来自最佳科组，可编辑）</div>
+        <div class="panel-desc">单科数 / 课时取自参考月「最佳科组」；周数为该科组当月周数（用于周度分解）。可增删科组或在表格内直接修改。</div>
+        <div id="tDeptWrap"></div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn" id="tAdd">＋ 添加科组</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">① ＋ ② 两步预测：A 法（单科占比）与 B 法（课时占比）</div>
+        <div class="panel-desc">A 法预测ᵢ = (单科ᵢ / 校区总单科) × C；B 法预测ᵢ = (课时ᵢ / 校区总课时) × C。两步均值 = (Aᵢ + Bᵢ) / 2。</div>
+        <div id="tCalcWrap"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">③ ＋ ④ 预测周平均 · 对齐 · 区间控制</div>
+        <div class="panel-desc">预测周平均ᵢ = 两步均值ᵢ / 单科ᵢ；取四科组预测周平均之均值作为「共同周平均」，最终月度预测ᵢ = 共同周平均 × 单科ᵢ。四科组预测之和须落在区间 [C, C+30]：不足则上调共同周平均直至达到 C；超出 +30 则压回。</div>
+        <div id="tAlignWrap"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⑤ G1 / G2 / G3 倒推目标（每科组）</div>
+        <div class="panel-desc">完成率 = 四科组预测之和 / C；100%→G1，110%→G2，125%→G3。各档总盘 = C × 档位，按单科占比分解到每科组。</div>
+        <div id="tGWrap"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⑥ 最终预测结果（周度 / 月度 / 完成率 / 达到级别）</div>
+        <div class="panel-desc">周度生产预测ᵢ = 月度预测ᵢ / 该科组周数（按周均摊）。月度完成率与达到级别为校区级口径（因分配 ∝ 单科数，各组的完成率一致）。</div>
+        <div id="tFinalWrap"></div>
+        <div class="panel-subtitle" style="margin-top:16px">每周分解（按周均摊）</div>
+        <div id="tWeeklyWrap"></div>
+        <div class="row" style="margin-top:14px">
+          <button class="btn primary" id="tCopy">⧉ 复制结果表</button>
+          <button class="btn" id="tCsv">⬇ 导出 CSV</button>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⑦ 校区汇总</div>
+        <div class="panel-desc">校区级关键指标一览。</div>
+        <div id="tSummaryWrap"></div>
+      </div>`;
+    $('#content').innerHTML = html;
+
+    function renderDeptInputs() {
+      const wrap = $('#tDeptWrap');
+      if (!state.depts.length) { wrap.innerHTML = '<div class="preview-note">暂无科组，请点击「读入该月科组数据」或「添加科组」。</div>'; return; }
+      let h = '<div class="table-wrap"><table><thead><tr><th>科组名称</th><th class="num">单科数 sᵢ</th><th class="num">上月课时 hᵢ</th><th class="num">周数 wᵢ</th><th></th></tr></thead><tbody>';
+      state.depts.forEach((d, i) => {
+        h += '<tr>' +
+          '<td><input class="cell-in" data-i="' + i + '" data-k="name" value="' + esc(d.name) + '"></td>' +
+          '<td class="num"><input class="cell-in mono" data-i="' + i + '" data-k="s" type="number" min="0" step="any" value="' + d.s + '"></td>' +
+          '<td class="num"><input class="cell-in mono" data-i="' + i + '" data-k="h" type="number" min="0" step="any" value="' + d.h + '"></td>' +
+          '<td class="num"><input class="cell-in mono" data-i="' + i + '" data-k="w" type="number" min="1" step="any" value="' + d.w + '"></td>' +
+          '<td><button class="row-del" data-i="' + i + '" title="删除">×</button></td></tr>';
+      });
+      h += '</tbody></table></div>';
+      wrap.innerHTML = h;
+      wrap.querySelectorAll('input').forEach(inp => inp.addEventListener('input', onDeptInput));
+      wrap.querySelectorAll('.row-del').forEach(b => b.addEventListener('click', () => {
+        if (state.depts.length <= 1) { toast('至少保留一个科组'); return; }
+        state.depts.splice(+b.dataset.i, 1); renderDeptInputs(); recompute();
+      }));
+    }
+    function onDeptInput(e) {
+      const i = +e.target.dataset.i, k = e.target.dataset.k;
+      if (k === 'name') state.depts[i].name = e.target.value;
+      else state.depts[i][k] = parseFloat(e.target.value) || 0;
+      recompute();
+    }
+
+    function recompute() {
+      const C = state.C;
+      const S = state.depts.reduce((a, d) => a + (d.s || 0), 0);
+      const H = state.depts.reduce((a, d) => a + (d.h || 0), 0);
+      const src = dataSourceProd(state.year, state.month);
+
+      // 数据源一致性校验（步骤②）
+      let consistHtml;
+      if (src == null) {
+        consistHtml = '<span class="tag warn">数据源无该月周报</span> <span class="preview-note">请在「数据源」上传该月 DOS 周报后，1v1 月生产课时将自动参与校验。</span>';
+      } else {
+        const diff = H - src;
+        const ok = Math.abs(diff) < 1;
+        const diffTxt = (diff >= 0 ? '+' : '') + fmt(diff);
+        consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　' +
+          '<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>' +
+          '<span class="preview-note" style="margin-left:6px">差值 ' + diffTxt + ' 课时' + (ok ? '' : '（B 法占比以最佳科组课时为准）') + '</span>';
+      }
+      $('#tConsist').innerHTML = consistHtml;
+
+      // ① + ② 两步预测
+      const rows = state.depts.map(d => {
+        const a = S > 0 ? d.s / S : 0;        // A 法占比
+        const b = H > 0 ? d.h / H : 0;        // B 法占比
+        const predA = a * C;
+        const predB = b * C;
+        const avg = (predA + predB) / 2;       // ③ 均值
+        const wAvg = d.s > 0 ? avg / d.s : 0;  // ④ 预测周平均
+        return { name: d.name, s: d.s, h: d.h, w: d.w, a, b, predA, predB, avg, wAvg };
+      });
+
+      let ch = '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">A 法占比</th><th class="num">A 法预测</th><th class="num">课时</th><th class="num">B 法占比</th><th class="num">B 法预测</th><th class="num">两步均值</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        ch += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.s) + '</td>' +
+          '<td class="num">' + pct(r.a) + '</td>' +
+          '<td class="num">' + fmt(r.predA) + '</td>' +
+          '<td class="num">' + fmt(r.h) + '</td>' +
+          '<td class="num">' + pct(r.b) + '</td>' +
+          '<td class="num">' + fmt(r.predB) + '</td>' +
+          '<td class="num" style="color:var(--indigo);font-weight:600">' + fmt(r.avg) + '</td></tr>';
+      });
+      ch += '</tbody></table></div>';
+      $('#tCalcWrap').innerHTML = ch;
+
+      // ④ 对齐与区间控制
+      const meanW = rows.reduce((a, r) => a + r.wAvg, 0) / (rows.length || 1);
+      const sum0 = meanW * S;
+      const lower = S > 0 ? C / S : 0;
+      const upper = S > 0 ? (C + 30) / S : 0;
+      let commonW = meanW;
+      let adjNote;
+      if (S <= 0) { adjNote = '单科数合计为 0，无法计算。'; }
+      else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
+      else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
+      else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
+
+      let ah = '<div class="stat-grid" style="margin-bottom:10px">' +
+        '<div class="stat-card"><div class="k">四科组预测周平均均值</div><div class="v">' + fmt(meanW, 2) + '</div></div>' +
+        '<div class="stat-card"><div class="k">共同周平均（对齐后）</div><div class="v" style="color:var(--indigo)">' + fmt(commonW, 2) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区总单科 S</div><div class="v">' + fmt(S) + '</div></div>' +
+        '<div class="stat-card"><div class="k">区间 [C, C+30]</div><div class="v">' + fmt(C) + ' ~ ' + fmt(C + 30) + '</div></div>' +
+        '</div>';
+      ah += '<div class="preview-note" style="margin-bottom:8px">' + adjNote + '</div>';
+      ah += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">预测周平均</th><th class="num">共同周平均</th><th class="num">最终月度预测</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        const final_i = commonW * r.s;
+        ah += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.wAvg, 2) + '</td>' +
+          '<td class="num" style="color:var(--green);font-weight:600">' + fmt(commonW, 2) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(final_i) + '</td></tr>';
+      });
+      ah += '</tbody></table></div>';
+      $('#tAlignWrap').innerHTML = ah;
+
+      // ⑤ G 档倒推 + 完成率 / 达到级别
+      const sumFinal = commonW * S;
+      const completion = C > 0 ? sumFinal / C : 0;
+      let achieved = '未达标';
+      if (completion >= 1.25) achieved = 'G3';
+      else if (completion >= 1.10) achieved = 'G2';
+      else if (completion >= 1.00) achieved = 'G1';
+      const Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
+      rows.forEach(r => {
+        r.final = commonW * r.s;
+        r.weekly = r.w > 0 ? r.final / r.w : 0;
+        r.G1 = (C * Gcfg.G1) * (r.s / (S || 1));
+        r.G2 = (C * Gcfg.G2) * (r.s / (S || 1));
+        r.G3 = (C * Gcfg.G3) * (r.s / (S || 1));
+      });
+
+      let gh = '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">G1 指标（100%）</th><th class="num">G2 指标（110%）</th><th class="num">G3 指标（125%）</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        gh += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.s) + '</td>' +
+          '<td class="num">' + fmt(r.G1) + '</td>' +
+          '<td class="num">' + fmt(r.G2) + '</td>' +
+          '<td class="num">' + fmt(r.G3) + '</td></tr>';
+      });
+      gh += '</tbody></table></div>';
+      $('#tGWrap').innerHTML = gh;
+
+      // ⑥ 最终预测结果
+      const levelBadge = achieved === 'G3'
+        ? '<span class="tag" style="background:#4F46E5;color:#fff">G3（125%）</span>'
+        : achieved === 'G2'
+          ? '<span class="tag warn">G2（110%）</span>'
+          : achieved === 'G1'
+            ? '<span class="tag ok">G1（100%）</span>'
+            : '<span class="tag warn">未达标</span>';
+      let fh = '<div class="stat-grid" style="margin-bottom:10px">' +
+        '<div class="stat-card"><div class="k">校区预测总盘</div><div class="v">' + fmt(sumFinal) + '</div></div>' +
+        '<div class="stat-card"><div class="k">月度完成率</div><div class="v" style="color:var(--indigo)">' + pct(completion) + '</div></div>' +
+        '<div class="stat-card"><div class="k">达到级别</div><div class="v">' + levelBadge + '</div></div>' +
+        '</div>';
+      fh += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">周度生产预测</th><th class="num">月度生产预测</th><th class="num">月度完成率</th><th class="num">达到级别</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        fh += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.weekly, 1) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(r.final) + '</td>' +
+          '<td class="num">' + pct(completion) + '</td>' +
+          '<td class="num">' + levelBadge + '</td></tr>';
+      });
+      fh += '</tbody></table></div>';
+      $('#tFinalWrap').innerHTML = fh;
+
+      // 每周分解
+      const maxW = Math.max(...rows.map(r => r.w), 0);
+      if (maxW > 0) {
+        let wh = '<div class="table-wrap"><table><thead><tr><th>科组</th>';
+        for (let i = 1; i <= maxW; i++) wh += '<th class="num">第' + i + '周</th>';
+        wh += '</tr></thead><tbody>';
+        rows.forEach(r => {
+          wh += '<td>' + esc(r.name) + '</td>';
+          for (let i = 1; i <= maxW; i++) wh += '<td class="num">' + (i <= r.w ? fmt(r.weekly, 1) : '<span class="muted">—</span>') + '</td>';
+          wh += '</tr>';
+        });
+        wh += '</tbody></table></div>';
+        $('#tWeeklyWrap').innerHTML = wh;
+      } else {
+        $('#tWeeklyWrap').innerHTML = '<div class="preview-note">请填写科组周数以生成每周分解。</div>';
+      }
+
+      // ⑦ 校区汇总
+      const srcLine = src == null
+        ? '<div class="stat-card"><div class="k">数据源 1v1 月生产课时</div><div class="v muted">无该月周报</div></div>'
+        : (function () {
+            const diff = H - src; const ok = Math.abs(diff) < 1;
+            return '<div class="stat-card"><div class="k">数据源 1v1 月生产课时</div><div class="v">' + fmt(src) + '</div></div>' +
+              '<div class="stat-card"><div class="k">与最佳科组课时一致性</div><div class="v">' + (ok ? '<span class="tag ok">一致</span>' : '<span class="tag warn">差 ' + fmt(diff) + '</span>') + '</div></div>';
+          })();
+      let sh = '<div class="stat-grid">' +
+        '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(C) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区总单科 S</div><div class="v">' + fmt(S) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区总课时 H（最佳科组）</div><div class="v">' + fmt(H) + '</div></div>' +
+        srcLine +
+        '<div class="stat-card"><div class="k">共同周平均</div><div class="v" style="color:var(--indigo)">' + fmt(commonW, 2) + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区预测总盘</div><div class="v">' + fmt(sumFinal) + '</div></div>' +
+        '<div class="stat-card"><div class="k">月度完成率</div><div class="v" style="color:var(--indigo)">' + pct(completion) + '</div></div>' +
+        '<div class="stat-card"><div class="k">达到级别</div><div class="v">' + levelBadge + '</div></div>' +
+        '</div>';
+      $('#tSummaryWrap').innerHTML = sh;
+
+      calc = { rows, C, S, H, commonW, sumFinal, completion, achieved, src };
+    }
+
+    function exportFinal() {
+      if (!calc) return '﻿';
+      const head = ['科组', '单科数', '周数', '周度预测', '月度预测', '月度完成率', '达到级别', 'G1', 'G2', 'G3'];
+      const lines = [head.join(',')];
+      const r2 = n => Math.round(n * 100) / 100;
+      calc.rows.forEach(r => {
+        lines.push([r.name, r.s, r.w, r2(r.weekly), r2(r.final), Math.round(calc.completion * 10000) / 100 + '%', calc.achieved, r2(r.G1), r2(r.G2), r2(r.G3)].join(','));
+      });
+      lines.push(['校区汇总', calc.S, '', '', '', Math.round(calc.completion * 10000) / 100 + '%', calc.achieved, '', '', ''].join(','));
+      lines.push(['', '', '', '校区预测总盘', r2(calc.sumFinal), '校区生产指标C', r2(calc.C), '', '', ''].join(','));
+      return '﻿' + lines.join('\n');
+    }
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => toast('已复制结果表到剪贴板'), () => fallbackCopy(text));
+      else fallbackCopy(text);
+    }
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea'); ta.value = text; document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); toast('已复制结果表到剪贴板'); } catch (e) { toast('复制失败，请手动选择'); }
+      document.body.removeChild(ta);
+    }
+    function downloadCSV(text) {
+      const blob = new Blob(['﻿' + text], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a'); a.href = url; a.download = '科组生产指标预测表.csv';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+      toast('已导出 CSV');
+    }
+    function fillMonthSelects() {
+      const months = kezuMonths();
+      const ys = [...new Set(months.map(m => m.year))];
+      if (!ys.includes(state.year) && ys.length) state.year = ys[ys.length - 1];
+      $('#tYearSel').innerHTML = ys.map(y => '<option value="' + y + '"' + (y === state.year ? ' selected' : '') + '>' + y + ' 年</option>').join('');
+      const ms = months.filter(m => m.year === state.year).map(m => m.month);
+      if (!ms.includes(state.month) && ms.length) state.month = ms[ms.length - 1];
+      $('#tMonthSel').innerHTML = ms.map(mo => '<option value="' + mo + '"' + (mo === state.month ? ' selected' : '') + '>' + mo + ' 月</option>').join('');
+    }
+    function loadCurrentMonth() {
+      const loaded = loadMonth(state.year, state.month);
+      if (loaded) { state.depts = loaded; toast('已读入 ' + loaded.length + ' 个科组（' + state.year + ' 年 ' + state.month + ' 月）'); }
+      else { state.depts = []; toast('「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据'); }
+      renderDeptInputs(); recompute();
+    }
+
+    // 初始化：默认读入最新月份
+    const months = kezuMonths();
+    if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
+    fillMonthSelects();
+    loadCurrentMonth();
+
+    $('#tC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; recompute(); });
+    $('#tYearSel').addEventListener('change', e => {
+      state.year = parseInt(e.target.value, 10); fillMonthSelects(); loadCurrentMonth();
+    });
+    $('#tMonthSel').addEventListener('change', e => {
+      state.month = parseInt(e.target.value, 10); loadCurrentMonth();
+    });
+    $('#tLoad').addEventListener('click', loadCurrentMonth);
+    $('#tClear').addEventListener('click', () => { state.depts = []; renderDeptInputs(); recompute(); });
+    $('#tAdd').addEventListener('click', () => { state.depts.push({ name: '新科组', s: 1, h: 0, w: 4 }); renderDeptInputs(); recompute(); });
+    $('#tCopy').addEventListener('click', () => copyText(exportFinal()));
+    $('#tCsv').addEventListener('click', () => downloadCSV(exportFinal()));
+  }
+
   // —— 图表 ——
   function drawBar(id, labels, data, label, color) {
     destroyChart(id);
@@ -1215,6 +1572,7 @@
   // —— 路由 ——
   const tabs = {
     kezu: { title: '最佳科组', render: renderKezu },
+    target: { title: '科组生产指标', render: renderTarget },
     kpi: { title: '教师 KPI', render: renderKpi },
     compare: { title: '数据源', render: renderCompare },
     dashboard: { title: '核心看板', render: renderDashboard },
