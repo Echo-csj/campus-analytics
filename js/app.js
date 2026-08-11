@@ -536,6 +536,8 @@
       if (res.score.exam) parts.push('季度考试数据');
       if (res.score.rating) parts.push('最佳科组评比汇总');
       html += '<div class="preview-note">同时识别到评比相关表：<b>' + parts.join('、') + '</b>，确认后将一并入库并在下方呈现排名。</div>';
+    } else {
+      html += '<div class="preview-note warn-cell">⚠ 未识别到评比相关表（全年汇总透视 / 季度考试数据 / 最佳科组评比汇总）。若需核心看板呈现排名，请上传含这些表的全量文件；如 sheet 名不同，系统会尝试按关键词/Sheet5 兜底匹配。</div>';
     }
     html += kezuTableHTML(records);
     html += '<div class="row" style="margin-top:14px">';
@@ -1092,7 +1094,21 @@
   function renderKezuRankDashboard() {
     const recs = STORE.list('bestkezu_score');
     if (!recs.length) {
-      $('#dashBody').innerHTML = '<div class="empty">暂无最佳科组评比数据。请先在「最佳科组」模块上传含『最佳科组评比汇总』(Sheet5) 的全量文件并入库，即可在此查看各季度与全年排名。</div>';
+      const kezu = STORE.list('bestkezu');
+      let msg = '<div class="empty">';
+      msg += '<div style="font-weight:600;margin-bottom:8px">暂无最佳科组评比数据</div>';
+      if (kezu.length) {
+        msg += '<div>检测到「最佳科组」板块已有 <b>' + kezu.length + '</b> 条科组×月度数据，但缺少「评比结果」数据。</div>';
+        msg += '<div style="margin-top:8px">原因通常是：</div><ul style="text-align:left;display:inline-block;margin:6px 0">';
+        msg += '<li>上传的文件里<strong>没有 Sheet5『最佳科组评比汇总』</strong>，或该 sheet 名称不包含“评比/排名/最佳科组”等关键词；</li>';
+        msg += '<li>有评比表，但解析后<strong>未点击「确认入库」</strong>；</li>';
+        msg += '<li>之后点击了「清空本科组数据」，把评比数据一起清除了。</li></ul>';
+        msg += '<div>请重新上传含评比汇总的原始全量文件，并在「最佳科组」模块点击<strong>确认入库</strong>。</div>';
+      } else {
+        msg += '<div>请先在「最佳科组」模块上传含『最佳科组评比汇总』(Sheet5) 的全量文件并入库，即可在此查看各季度与全年排名。</div>';
+      }
+      msg += '</div>';
+      $('#dashBody').innerHTML = msg;
       return;
     }
     const years = recs.map(r => r.year).filter(y => y).sort((a, b) => b - a);

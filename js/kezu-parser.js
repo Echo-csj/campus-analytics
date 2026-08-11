@@ -309,10 +309,13 @@
   }
   function parseScoreSheets(sheets) {
     const result = { pivot: null, exam: null, rating: null, consumed: [] };
+    // 精确匹配优先，再按关键词/Sheet序号兜底
     const byName = n => sheets.find(s => s.name === n);
-    const piv = byName('全年汇总透视');
-    const exam = byName('季度考试数据');
-    const rating = byName('最佳科组评比汇总');
+    const byInclude = keys => sheets.find(s => keys.some(k => String(s.name || '').includes(k)));
+    const bySheetIndex = n => sheets.find(s => String(s.name || '').toLowerCase() === 'sheet' + n);
+    const piv = byName('全年汇总透视') || byInclude(['汇总透视', '全年汇总']) || bySheetIndex(3);
+    const exam = byName('季度考试数据') || byInclude(['考试数据', '季度考试']) || bySheetIndex(4);
+    const rating = byName('最佳科组评比汇总') || byInclude(['最佳科组', '评比汇总', '科组评比', '评比排名', '排名']) || bySheetIndex(5);
     if (piv) { result.pivot = { name: piv.name, blocks: extractScoreBlocks(piv.rows) }; result.consumed.push(piv.name); }
     if (exam) { result.exam = { name: exam.name, blocks: extractScoreBlocks(exam.rows) }; result.consumed.push(exam.name); }
     if (rating) { result.rating = { name: rating.name, blocks: extractScoreBlocks(rating.rows) }; result.consumed.push(rating.name); }
