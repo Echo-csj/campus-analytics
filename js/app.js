@@ -1297,7 +1297,6 @@
       if (!state.depts.length) { wrap.innerHTML = '<div class="preview-note">暂无科组，请点击「读入该月科组数据」或「添加科组」。</div>'; return; }
       const S = state.depts.reduce((a, d) => a + (d.s || 0), 0);
       const H = state.depts.reduce((a, d) => a + (d.h || 0), 0);
-      const Wtot = state.depts.reduce((a, d) => a + (d.w || 0), 0);
       let h = '<div class="table-wrap"><table><thead><tr><th>科组名称</th><th class="num">单科数 sᵢ</th><th class="num">上月课时 hᵢ</th><th class="num">周数 wᵢ</th><th></th></tr></thead><tbody>';
       state.depts.forEach((d, i) => {
         h += '<tr>' +
@@ -1311,7 +1310,7 @@
       h += '<tfoot><tr><td class="total-label">校区总计</td>' +
         '<td class="num">' + fmt(S) + '</td>' +
         '<td class="num">' + fmt(H) + '</td>' +
-        '<td class="num">' + fmt(Wtot) + '</td>' +
+        '<td class="num">—</td>' +
         '<td></td></tr></tfoot>';
       h += '</table></div>';
       wrap.innerHTML = h;
@@ -1373,10 +1372,10 @@
       ch += '</tbody>';
       ch += '<tfoot><tr><td class="total-label">校区总计</td>' +
         '<td class="num">' + fmt(S) + '</td>' +
-        '<td class="num">100%</td>' +
+        '<td class="num">—</td>' +
         '<td class="num">' + fmt(C) + '</td>' +
         '<td class="num">' + fmt(H) + '</td>' +
-        '<td class="num">100%</td>' +
+        '<td class="num">—</td>' +
         '<td class="num">' + fmt(C) + '</td>' +
         '<td class="num" style="color:var(--indigo);font-weight:600">' + fmt(C) + '</td></tr></tfoot>';
       ch += '</table></div>';
@@ -1393,6 +1392,8 @@
       else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
       else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
       else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
+
+      const sumFinal = commonW * S;
 
       let ah = '<div class="stat-grid" style="margin-bottom:10px">' +
         '<div class="stat-card"><div class="k">四科组预测周平均均值</div><div class="v">' + fmt(meanW, 2) + '</div></div>' +
@@ -1418,7 +1419,6 @@
       $('#tAlignWrap').innerHTML = ah;
 
       // ⑤ G 档倒推 + 完成率 / 达到级别
-      const sumFinal = commonW * S;
       const completion = C > 0 ? sumFinal / C : 0;
       let achieved = '未达标';
       if (completion >= 1.25) achieved = 'G3';
