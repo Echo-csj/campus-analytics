@@ -932,13 +932,14 @@
   // 根据当前日期，按"自然周(周一至周日)+人工月"规则推算 X月第X周
   // 规则：自然月最后一天若在周一/周二 -> 该周归新月份(本月止于上一周日)；
   //       若在周三及之后 -> 该周归本月(止于本周日)。周日即月度最后一天。
+  // 人工月最后一天（自然周周日）：自然月最后一天若在当周周二及之前则归上月，周三及之后归本月
+  function manualLastDay(Y, m) {
+    const L = new Date(Y, m, 0); // 自然月最后一天
+    const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
+    if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
+    return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
+  }
   function currentManualWeek(date) {
-    function manualLastDay(Y, m) {
-      const L = new Date(Y, m, 0); // 自然月最后一天
-      const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
-      if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
-      return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
-    }
     function manualMonthOf(d) {
       let Y = d.getFullYear(), m = d.getMonth() + 1;
       const ML = manualLastDay(Y, m);
@@ -1035,20 +1036,31 @@
       else { const diff = H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
       $('#dtConsist').innerHTML = consistHtml;
 
-      const cw = currentManualWeek(new Date()); // 当前日期推算：X月第X周（不再依赖数据残留）
-      const { campusActual, campusSched, hasData } = actualSummary(cw.year, cw.month, cw.week);
+      // 报告周 = 已完成的周（当前周未结束则取上一周；周日为当周最后一天）
+      const today = new Date();
+      const cw = currentManualWeek(today);
+      let reportWeek = 0;
+      if (cw.year === pm.year && cw.month === pm.month) {
+        // 今天落在本预测月内：未到周日则本周未完成，取上一周
+        reportWeek = (today.getDay() === 0) ? cw.week : Math.max(1, cw.week - 1);
+      } else {
+        const pmEnd = manualLastDay(pm.year, pm.month);
+        if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week; // 预测月已结束→全部周完成
+      }
+      const { campusActual, campusSched, hasData } = actualSummary(pm.year, pm.month, reportWeek);
       const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
-      // 校区生产差距课时 = 生产指标（对应 G 档）− 预排总数据
+      // 校区生产差距课时 = 生产指标（对应 G 档）− 预排总数据（累计至已完成周）
       const gapG1 = state.C - campusSched;
       const gapG2 = state.C * 1.10 - campusSched;
       const gapG3 = state.C * 1.25 - campusSched;
       const gapText = v => v <= 0 ? '<span class="tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>';
 
+      const weekLabel = reportWeek > 0 ? (pm.month + '月第' + reportWeek + '周完成率') : '本周完成率';
       let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
-        '<div class="stat-card"><div class="k">' + cw.month + '月第' + cw.week + '周完成率</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">' + weekLabel + '</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
