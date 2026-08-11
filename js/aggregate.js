@@ -59,6 +59,63 @@
     });
   }
 
+  // —— 人工月支持：把周报记录映射到「人工月」（周度=自然周 Mon–Sun，月度=人工月，最后一天为周日）——
+  // 人工月最后一天（自然周周日）：自然月最后一天若在当周周二及之前→该周归上月，周三及之后→归本月
+  function manualLastDay(Y, m) {
+    const L = new Date(Y, m, 0); // 自然月最后一天（m 月：取 m 月第 0 天）
+    const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
+    if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
+    return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
+  }
+  function manualMonthOf(date) {
+    let Y = date.getFullYear(), m = date.getMonth() + 1;
+    const ML = manualLastDay(Y, m);
+    if (date <= ML) {
+      let pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
+      const prevML = manualLastDay(pY, pm0);
+      if (date > prevML) return { year: Y, month: m };
+      return { year: pY, month: pm0 };
+    }
+    let nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
+    return { year: nY, month: nm };
+  }
+  // 由周报记录的（自然年/自然月/weekSeq）重建该周「周日（周度最后一天）」日期
+  function weekEndSunday(y, m, wk) {
+    if (!y || !m || !wk) return null;
+    const first = new Date(y, m - 1, 1);
+    const dow = first.getDay(); // 0=Sun..6=Sat
+    const monOffset = (8 - dow) % 7; // 当月第 1 周周一距 1 号的天数（Sun→1, Mon→0, …）
+    const wk1Mon = new Date(y, m - 1, 1 + monOffset);
+    return new Date(wk1Mon.getFullYear(), wk1Mon.getMonth(), wk1Mon.getDate() + (wk - 1) * 7 + 6);
+  }
+  // 取各区各「人工月」的月度周报（人工月最后一周），供核心看板年度/季度看板使用
+  function manualMonthEndWeeklies(weeklyRecs) {
+    const byMM = {};
+    withMonthEnd(weeklyRecs).forEach(r => {
+      const sun = weekEndSunday(r.year, r.month, r.week);
+      const mm = sun ? manualMonthOf(sun) : { year: r.year, month: r.month }; // 缺 weekSeq 退化为自然月
+      const k = mm.year + '-' + mm.month;
+      if (!byMM[k]) byMM[k] = { year: mm.year, month: mm.month, recs: [] };
+      byMM[k].recs.push({ rec: r, sun: sun ? sun.getTime() : 0, wk: r.week || 0 });
+    });
+    const result = [];
+    Object.keys(byMM).forEach(k => {
+      const g = byMM[k];
+      g.recs.sort((a, b) => (b.sun - a.sun) || (b.wk - a.wk)); // 周度最后一天最晚者 = 人工月最后一周
+      const pick = g.recs[0].rec;
+      result.push(Object.assign({}, pick, { year: g.year, month: g.month, isMonthEnd: true }));
+    });
+    result.sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    // 与自然月月度周报保持同一派生口径（比例归一化 + 完成率重写）
+    return result.map(r => {
+      r = normalizeWeeklyValues(r);
+      const prod = r.values.v1MonthProduced, tgt = r.values.v1MonthTarget;
+      if (prod != null && tgt != null && tgt !== 0) r.values.v1MonthRate = prod / tgt;
+      else { const rate = r.values.v1MonthRate; if (typeof rate === 'number' && rate > 0 && rate < 0.05) r.values.v1MonthRate = rate * 100; }
+      return r;
+    });
+  }
+
   // 比例字段防御性归一化：统一存为小数(0–1)。旧数据/异常原表可能把 70.39 当 70.39% 存储。
   // 完成率字段（canExceed100）可>100%，值>1 表示完成倍数（如 1.4 → 140%），不做 ÷100。
   function normalizeRatio(key, val) {
@@ -289,8 +346,8 @@
   }
 
   // 季度分组（按 年-季），返回可直接渲染的季度汇总记录
-  function quarterlyAggregate(weeklyRecs) {
-    const me = monthEndWeeklies(weeklyRecs);
+  function quarterlyAggregate(weeklyRecs, meOverride) {
+    const me = meOverride || monthEndWeeklies(weeklyRecs);
     const map = {};
     me.forEach(r => {
       const q = Math.floor((r.month - 1) / 3) + 1;
@@ -395,8 +452,8 @@
   ];
 
   // 年度汇总：按年聚合所有月度周报
-  function yearlyAggregate(weeklyRecs, year) {
-    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
+  function yearlyAggregate(weeklyRecs, year, meOverride) {
+    const me = (meOverride || monthEndWeeklies(weeklyRecs)).filter(r => r.year === year);
     if (!me.length) return null;
     me.sort((a, b) => a.month - b.month);
     const months = me;
@@ -437,7 +494,7 @@
   }
 
   CA.aggregate = {
-    withMonthEnd, monthEndWeeklies, compareYearStandard,
+    withMonthEnd, monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
     kezuMonthly, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate, evalExpr, normalizeRatio,
     YEARLY_RULES, yearlyAggregate,

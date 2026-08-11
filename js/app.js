@@ -1030,6 +1030,18 @@
       const res = computeKezuTarget(depts, state.C);
       const { S, H, rows, commonW, sumFinal, completion, achieved, Gcfg } = res;
 
+      // 当前 1V1 人数 = 数据源中最新一周（year/month/week 最大）的「1v1在读学员」
+      const latestV1 = (function () {
+        const rs = STORE.list('weekly');
+        if (!rs.length) return null;
+        let best = null;
+        rs.forEach(r => {
+          const key = (r.year || 0) * 10000 + (r.month || 0) * 100 + (r.week || 0);
+          if (!best || key > best.key) best = { key, v: (r.values && r.values.v1Students != null) ? num(r.values.v1Students) : null };
+        });
+        return best ? best.v : null;
+      })();
+
       const src = dataSourceProd(state.year, state.month);
       let consistHtml;
       if (src == null) consistHtml = '<span class="tag warn">数据源无该月周报</span> <span class="preview-note">「1v1 月生产课时」校验需上传该月 DOS 周报。</span>';
@@ -1058,6 +1070,7 @@
       const weekLabel = reportWeek > 0 ? (pm.month + '月第' + reportWeek + '周完成率') : '本周完成率';
       let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
+        '<div class="stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
         '<div class="stat-card"><div class="k">' + weekLabel + '</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
@@ -1098,7 +1111,7 @@
   function renderDashboard() {
     let html = '<div class="panel"><div class="panel-title">核心数据看板</div>';
     html += '<div class="panel-desc">基于《年度数据统计标准》和《季度数据统计标准》汇总，以仪表盘形式直观呈现年度核心指标和各季度对比趋势。数据源为各月「月度周报」。</div>';
-    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="sat">五项满意度</button><button class="dash-tab" data-sub="kezu">最佳科组排名</button><button class="dash-tab" data-sub="target">科组生产预测</button></div>';
+    html += '<div class="dash-tabs"><button class="dash-tab active" data-sub="year">年度汇总数据看板</button><button class="dash-tab" data-sub="quarter">季度汇总数据对比看板</button><button class="dash-tab" data-sub="weekly">周报对比</button><button class="dash-tab" data-sub="sat">五项满意度</button><button class="dash-tab" data-sub="kezu">最佳科组排名</button><button class="dash-tab" data-sub="target">科组生产预测</button></div>';
     html += '<div id="dashBody"></div></div>';
     $('#content').innerHTML = html;
     $all('.dash-tab').forEach(b => b.addEventListener('click', () => {
@@ -1108,6 +1121,7 @@
       else if (b.dataset.sub === 'quarter') renderQuarterDashboard();
       else if (b.dataset.sub === 'kezu') renderKezuRankDashboard();
       else if (b.dataset.sub === 'target') renderKezuTargetDash();
+      else if (b.dataset.sub === 'weekly') renderWeeklyCompareDashboard();
       else renderSatDashboard();
     }));
     renderYearDashboard();
@@ -1129,7 +1143,7 @@
 
     function drawYearDash() {
       const y = parseInt($('#dashYr').value, 10);
-      const yd = AGG.yearlyAggregate(recs, y);
+      const yd = AGG.yearlyAggregate(recs, y, AGG.manualMonthEndWeeklies(recs));
       if (!yd) { $('#ydashResult').innerHTML = '<div class="empty">' + y + '年暂无月度周报数据。</div>'; return; }
       const v = yd.values;
       // 核心指标仪表盘卡片
@@ -1149,7 +1163,7 @@
       if (yd.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + yd.missingMonths.map(m => m + '月').join('、') + '，结果可能不完整。</span>';
       h += '<div class="preview-note">' + note + '</div>';
       // 对比图表：各月趋势（课时生产现金 + 完成率双轴）
-      const me = AGG.monthEndWeeklies(recs).filter(r => r.year === y).sort((a, b) => a.month - b.month);
+      const me = AGG.manualMonthEndWeeklies(recs).filter(r => r.year === y).sort((a, b) => a.month - b.month);
       h += '<div class="section-h">年度月度趋势</div><div class="chart-box"><canvas id="yrTrendChart"></canvas></div>';
       // 完整数据表
       h += '<div class="section-h">完整年度数据</div><div class="table-wrap"><table><thead><tr><th>年度数据（名称）</th><th class="num">年度数据值</th><th>年度数据填写标准</th></tr></thead><tbody>';
@@ -1207,7 +1221,7 @@
 
     function drawQuarterDash() {
       const y = parseInt($('#dashQYr').value, 10);
-      const qAll = AGG.quarterlyAggregate(recs).filter(x => x.year === y).sort((a, b) => a.quarter - b.quarter);
+      const qAll = AGG.quarterlyAggregate(recs, AGG.manualMonthEndWeeklies(recs)).filter(x => x.year === y).sort((a, b) => a.quarter - b.quarter);
       if (!qAll.length) { $('#qdashResult').innerHTML = '<div class="empty">' + y + '年暂无季度数据。</div>'; return; }
       // 核心指标对比卡片（每季度一组）
       let h = '<div class="section-h">各季度核心指标仪表盘</div>';
@@ -1264,6 +1278,72 @@
       sel.addEventListener('change', drawCmp);
       drawCmp();
     }
+  }
+
+  // —— 核心看板 · 周报对比（某月各周横向对比，数据源于数据源 DOS 周报）——
+  function renderWeeklyCompareDashboard() {
+    const recs = STORE.list('weekly');
+    if (!recs.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库 DOS 周报（各周）。</div>'; return; }
+    // 可用月份（周报按自然月存储，故以自然月为选择维度）
+    const set = {}, months = [];
+    recs.forEach(r => { const k = r.year + '-' + r.month; if (!set[k]) { set[k] = true; months.push({ year: r.year, month: r.month }); } });
+    months.sort((a, b) => (a.year - b.year) || (a.month - b.month));
+    const def = months[months.length - 1];
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>月份</label><select id="wcMonth">' +
+      months.map(m => '<option value="' + m.year + '-' + m.month + '"' + (m.year === def.year && m.month === def.month ? ' selected' : '') + '>' + m.year + '年' + m.month + '月</option>').join('') + '</select></div>' +
+      '<div class="preview-note" style="margin-left:8px">数据来源：数据源（DOS 周报），仅做该月各周度数据横向对比。</div></div>';
+    html += '<div id="wcResult"></div>';
+    $('#dashBody').innerHTML = html;
+    $('#wcMonth').addEventListener('change', draw);
+
+    function draw() {
+      const [yy, mm] = $('#wcMonth').value.split('-').map(Number);
+      const wkRecs = recs.filter(r => r.year === yy && r.month === mm).sort((a, b) => (a.week || 0) - (b.week || 0));
+      if (!wkRecs.length) { $('#wcResult').innerHTML = '<div class="empty">该月暂无周报数据。</div>'; return; }
+      const weeks = wkRecs.map(r => '第' + (r.week || '?') + '周');
+      const keys = ['teacherCount', 'campusTotal', 'coreTeacherCount', 'doubleThreeCount', 'v1Students', 'v1Subjects', 'v6Students', 'v6Subjects',
+        'v1WeekTarget', 'v1WeekProduced', 'v1WeekRate', 'v6WeekProduced', 'weekCashTotal', 'v1WeekCash', 'v6WeekCash',
+        'weekEff', 'weekSaturation', 'v1WeekXiexiao', 'xfWeekNum', 'jkWeekNum', 'tfWeekNum', 'tkNum', 'entryWeek', 'quitWeek'];
+      const getv = (r, k) => (r.values && r.values[k] != null) ? r.values[k] : null;
+      let h = '<div class="preview-note">共 ' + wkRecs.length + ' 周数据。</div>';
+      h += '<div class="section-h">周度数据横向对比</div><div class="table-wrap"><table><thead><tr><th>指标</th>';
+      weeks.forEach(w => h += '<th class="num">' + w + '</th>');
+      h += '</tr></thead><tbody>';
+      keys.forEach(k => {
+        const f = SCHEMA.weeklyFields.find(x => x.key === k);
+        const isRatio = f && f.type === 'ratio' && f.unit !== '比';
+        h += '<tr><td>' + (f ? esc(f.label) : k) + '</td>';
+        wkRecs.forEach(r => {
+          const v = getv(r, k);
+          h += '<td class="num">' + (v == null ? '<span class="muted">—</span>' : (isRatio ? pct(v) : fmt(v))) + '</td>';
+        });
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+      // 选指标周度趋势图
+      h += '<div class="section-h">指标周度趋势</div><div class="field" style="margin-bottom:10px"><label>选择对比指标</label><select id="wcMetric">' +
+        keys.map(k => { const f = SCHEMA.weeklyFields.find(x => x.key === k); return '<option value="' + k + '">' + (f ? f.label : k) + '</option>'; }).join('') + '</select></div>';
+      h += '<div class="chart-box"><canvas id="wcChart"></canvas></div>';
+      $('#wcResult').innerHTML = h;
+      const sel = $('#wcMetric');
+      function drawChart() {
+        destroyChart('wcChart');
+        const ctx = $('#wcChart'); if (!ctx) return;
+        const k = sel.value;
+        const f = SCHEMA.weeklyFields.find(x => x.key === k);
+        const isRatio = f && f.type === 'ratio' && f.unit !== '比';
+        const data = wkRecs.map(r => { const v = getv(r, k); return (v != null && isFinite(v)) ? (isRatio ? v * 100 : v) : null; });
+        charts['wcChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: { labels: weeks, datasets: [{ label: f ? f.label : k, data, backgroundColor: 'rgba(79,70,229,.75)', borderRadius: 5 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { callback: v => isRatio ? v + '%' : fmt(v) } } } },
+        });
+      }
+      sel.addEventListener('change', drawChart);
+      drawChart();
+    }
+    draw();
   }
 
   // —— 核心看板 · 最佳科组排名（基于季度评比数据）——
