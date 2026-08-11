@@ -1028,48 +1028,21 @@
         '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
         '</div>';
 
-      h += '<div class="section-h">科组生产指标最终预测结果（' + pm.year + ' 年 ' + pm.month + ' 月）</div>';
-      h += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">周度生产预测</th><th class="num">月度生产预测</th><th class="num">月度完成率</th><th class="num">达到级别</th></tr></thead><tbody>';
-      rows.forEach(r => {
-        h += '<tr><td>' + esc(r.name) + '</td>' +
-          '<td class="num">' + fmt(r.s) + '</td>' +
-          '<td class="num">' + fmt(r.weekly, 1) + '</td>' +
-          '<td class="num" style="font-weight:600">' + fmt(r.final) + '</td>' +
-          '<td class="num">' + pct(completion) + '</td>' +
-          '<td class="num">' + levelBadge + '</td></tr>';
-      });
-      const sumWeeklyFinal = rows.reduce((a, r) => a + r.weekly, 0);
-      h += '</tbody>';
-      h += '<tfoot><tr><td class="total-label">校区总计</td>' +
-        '<td class="num">' + fmt(S) + '</td>' +
-        '<td class="num">' + fmt(sumWeeklyFinal, 1) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(sumFinal) + '</td>' +
-        '<td class="num">' + pct(completion) + '</td>' +
-        '<td class="num">' + levelBadge + '</td></tr></tfoot>';
-      h += '</table></div>';
-
       const maxW = Math.max(...rows.map(r => r.w), 0);
-      if (maxW > 0) {
-        h += '<div class="section-h" style="margin-top:16px">每周分解（按周均摊）</div>';
-        h += '<div class="table-wrap"><table><thead><tr><th>科组</th>';
-        for (let i = 1; i <= maxW; i++) h += '<th class="num">第' + i + '周</th>';
-        h += '</tr></thead><tbody>';
-        rows.forEach(r => {
-          h += '<td>' + esc(r.name) + '</td>';
-          for (let i = 1; i <= maxW; i++) h += '<td class="num">' + (i <= r.w ? fmt(r.weekly, 1) : '<span class="muted">—</span>') + '</td>';
-          h += '</tr>';
-        });
-        const wkTotals = [];
-        for (let i = 1; i <= maxW; i++) { let t = 0; rows.forEach(r => { if (i <= r.w) t += r.weekly; }); wkTotals.push(t); }
-        h += '</tbody>';
-        h += '<tfoot><tr><td class="total-label">校区总计</td>';
-        for (let i = 1; i <= maxW; i++) h += '<td class="num">' + fmt(wkTotals[i - 1], 1) + '</td>';
-        h += '</tr></tfoot>';
-        h += '</table></div>';
-      }
-
-      h += '<div class="preview-note" style="margin-top:12px">G 档目标（按单科占比倒推，校区总盘口径）：G1 = ' + fmt(state.C * Gcfg.G1) + '、G2 = ' + fmt(state.C * Gcfg.G2) + '、G3 = ' + fmt(state.C * Gcfg.G3) + '。</div>';
+      const actuals = STORE.list('kezuActual').filter(r => r.year === pm.year && r.month === pm.month);
+      const trackTable = maxW > 0
+        ? kezuTargetWideTableHTML(res, actuals)
+        : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
+      const hasTrack = maxW > 0 && actuals.length > 0;
+      h += '<div class="section-h-flex">' +
+        '<div class="section-h">科组月度汇总（按周展开）</div>' +
+        (hasTrack ? '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' : '') +
+        '</div>' +
+        '<div id="dtTrackPanel">' + trackTable + '</div>';
       $('#dtResult').innerHTML = h;
+      if (hasTrack) {
+        $('#dtExportImg').addEventListener('click', () => exportElementImage('#dtTrackPanel', '科组月度汇总_' + pm.year + '_' + pm.month + '.png'));
+      }
     }
 
     fillMonths();
@@ -1472,6 +1445,106 @@
     if (lv === 'G2') return '<span class="tag warn">G2（110%）</span>';
     if (lv === 'G1') return '<span class="tag ok">G1（100%）</span>';
     return '<span class="tag warn">未达标</span>';
+  }
+
+  // 将 DOM 元素导出为 PNG（依赖 html2canvas CDN）
+  function exportElementImage(sel, filename) {
+    const el = $(sel);
+    if (!el) { toast('未找到要导出的元素'); return; }
+    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请检查网络'); return; }
+    html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+      const a = document.createElement('a');
+      a.href = canvas.toDataURL('image/png');
+      a.download = filename || '看板.png';
+      document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      toast('图片已导出');
+    }).catch(err => { toast('导出失败：' + (err && err.message ? err.message : String(err))); });
+  }
+
+  // 生成「科组月度汇总（按周展开）」宽表 HTML（复用于核心看板与 target tab）
+  function kezuTargetWideTableHTML(res, actuals) {
+    const rows = res.rows.map(r => ({
+      name: r.name, s: r.s, w: r.w || 0, weekly: r.weekly || 0, final: r.final || 0
+    }));
+    const bySubj = {};
+    actuals.forEach(r => { (bySubj[r.dimension] = bySubj[r.dimension] || []).push(r); });
+    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
+
+    rows.forEach(r => {
+      const list = (bySubj[r.name] || []).slice().sort((a, b) => (a.week - b.week));
+      r._list = list;
+      r._sched = 0; r._prod = 0;
+      list.forEach(rec => { r._sched += num(rec.values && rec.values.scheduled); r._prod += num(rec.values && rec.values.produced); });
+    });
+
+    const maxW = Math.max(...rows.map(r => r.w), 0);
+    if (!maxW) return '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
+
+    const wkIdx = [];
+    for (let i = 1; i <= maxW; i++) {
+      let weekTgt = 0, weekSched = 0, weekProd = 0;
+      rows.forEach(r => {
+        const rec = (r._list || []).find(x => x.week === i);
+        if (i <= r.w) weekTgt += r.weekly;
+        weekSched += rec ? num(rec.values.scheduled) : 0;
+        weekProd += rec ? num(rec.values.produced) : 0;
+      });
+      wkIdx.push({ weekTgt, weekSched, weekProd });
+    }
+
+    let campusSched = 0, campusProd = 0;
+    rows.forEach(r => { campusSched += r._sched; campusProd += r._prod; });
+    const campusFinal = res.sumFinal || 0;
+    const campusPreRate = campusSched > 0 ? campusProd / campusSched : null;
+    const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
+
+    let h = '<div class="table-wrap"><table><thead>';
+    let head = '<tr><th rowspan="2">科组</th>';
+    for (let i = 1; i <= maxW; i++) head += '<th class="num" colspan="4">W' + i + '</th>';
+    head += '<th class="num" rowspan="2">月度预排</th><th class="num" rowspan="2">月度实际</th><th class="num" rowspan="2">月度预排<br>完成率</th><th class="num" rowspan="2">月度实际<br>完成率</th></tr>';
+    let sub = '<tr>';
+    for (let i = 1; i <= maxW; i++) sub += '<th class="num">指标</th><th class="num">预排</th><th class="num">实际</th><th class="num">完成率</th>';
+    sub += '</tr>';
+    h += head + sub + '</thead><tbody>';
+
+    rows.forEach(r => {
+      let tr = '<tr><td>' + esc(r.name) + '</td>';
+      for (let i = 1; i <= maxW; i++) {
+        const rec = (r._list || []).find(x => x.week === i);
+        const hasWeek = i <= r.w;
+        const tgt = hasWeek ? r.weekly : 0;
+        const sched = rec ? num(rec.values.scheduled) : 0;
+        const prod = rec ? num(rec.values.produced) : 0;
+        const wkRate = tgt > 0 ? prod / tgt : null;
+        tr += '<td class="num">' + (hasWeek ? fmt(tgt, 1) : '<span class="muted">—</span>') + '</td>' +
+          '<td class="num">' + (sched > 0 ? fmt(sched, 1) : '<span class="muted">—</span>') + '</td>' +
+          '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
+          '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
+      }
+      const preRate = r._sched > 0 ? r._prod / r._sched : null;
+      const actRate = r.final > 0 ? r._prod / r.final : null;
+      tr += '<td class="num">' + (r._sched > 0 ? fmt(r._sched, 1) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="num" style="font-weight:600">' + (r._prod > 0 ? fmt(r._prod, 1) : '<span class="muted">—</span>') + '</td>' +
+        '<td class="num">' + (preRate == null ? '<span class="muted">—</span>' : pct(preRate)) + '</td>' +
+        '<td class="num">' + (actRate == null ? '<span class="muted">—</span>' : pct(actRate)) + '</td></tr>';
+      h += tr;
+    });
+
+    let tfoot = '<tr><td class="total-label">校区总计</td>';
+    for (let i = 1; i <= maxW; i++) {
+      const { weekTgt, weekSched, weekProd } = wkIdx[i - 1];
+      const wkRate = weekTgt > 0 ? weekProd / weekTgt : null;
+      tfoot += '<td class="num">' + fmt(weekTgt, 1) + '</td>' +
+        '<td class="num">' + fmt(weekSched, 1) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(weekProd, 1) + '</td>' +
+        '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
+    }
+    tfoot += '<td class="num" style="font-weight:600">' + (campusSched > 0 ? fmt(campusSched, 1) : '<span class="muted">—</span>') + '</td>' +
+      '<td class="num" style="font-weight:600">' + (campusProd > 0 ? fmt(campusProd, 1) : '<span class="muted">—</span>') + '</td>' +
+      '<td class="num">' + (campusPreRate == null ? '<span class="muted">—</span>' : pct(campusPreRate)) + '</td>' +
+      '<td class="num">' + (campusActRate == null ? '<span class="muted">—</span>' : pct(campusActRate)) + '</td></tr>';
+    h += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
+    return h;
   }
 
   function renderTarget() {
