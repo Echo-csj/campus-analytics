@@ -1484,13 +1484,28 @@
     if (!el) { toast('未找到要导出的元素'); return Promise.resolve(); }
     if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return Promise.resolve(); }
     toast('正在生成图片…');
-    return html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false }).then(canvas => {
+    // 计算完整内容宽度：宽表可能超出视口，需取内部 table 的真实宽度
+    let fullWidth = Math.max(el.scrollWidth, el.offsetWidth);
+    const innerTable = el.querySelector('table');
+    if (innerTable) fullWidth = Math.max(fullWidth, innerTable.scrollWidth, innerTable.offsetWidth);
+    fullWidth = Math.ceil(fullWidth) + 2;
+    // 克隆到离屏容器，解除宽度/overflow 约束，保证整表渲染（避免只截到可视部分）
+    const clone = el.cloneNode(true);
+    clone.style.width = fullWidth + 'px';
+    clone.querySelectorAll('.table-wrap').forEach(tw => { tw.style.overflow = 'visible'; });
+    clone.querySelectorAll('button').forEach(b => { b.style.visibility = 'hidden'; });
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:#ffffff;padding:0;z-index:-1;';
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+    return html2canvas(clone, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, width: fullWidth, windowWidth: fullWidth }).then(canvas => {
+      if (holder.parentNode) document.body.removeChild(holder);
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
       a.download = filename || '看板.png';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       toast('图片已导出');
-    }).catch(err => { toast('导出失败：' + (err && err.message ? err.message : String(err))); });
+    }).catch(err => { if (holder.parentNode) document.body.removeChild(holder); toast('导出失败：' + (err && err.message ? err.message : String(err))); });
   }
 
   // 生成并下载「科组周度实际数据」Excel 模板（标准表头，与 parseActualFile 对齐）
