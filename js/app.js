@@ -951,16 +951,21 @@
     function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
     function actualSummary(py, pm) {
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
-      let latest = 0, campusActual = 0;
+      let latest = 0, campusActual = 0, campusSched = 0;
       actuals.forEach(r => {
         const w = +r.week || 0;
-        const p = num(r.values && r.values.produced);
         if (w > latest) latest = w;
       });
       if (latest > 0) {
-        actuals.forEach(r => { if ((+r.week || 0) <= latest) campusActual += num(r.values && r.values.produced); });
+        actuals.forEach(r => {
+          const w = +r.week || 0;
+          if (w <= latest) {
+            campusActual += num(r.values && r.values.produced);
+            campusSched += num(r.values && r.values.scheduled);
+          }
+        });
       }
-      return { latest, campusActual };
+      return { latest, campusActual, campusSched };
     }
 
     const months = kezuMonths();
@@ -1005,27 +1010,22 @@
       else { const diff = H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
       $('#dtConsist').innerHTML = consistHtml;
 
-      const levelBadge = achieved === 'G3' ? '<span class="tag" style="background:#4F46E5;color:#fff">G3（125%）</span>'
-        : achieved === 'G2' ? '<span class="tag warn">G2（110%）</span>'
-        : achieved === 'G1' ? '<span class="tag ok">G1（100%）</span>'
-        : '<span class="tag warn">未达标</span>';
-
-      const { latest: actLatest, campusActual } = actualSummary(pm.year, pm.month);
+      const { latest: actLatest, campusActual, campusSched } = actualSummary(pm.year, pm.month);
       const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
-      const gapG1 = state.C - campusActual;
-      const gapG2 = state.C * 1.10 - campusActual;
-      const gapG3 = state.C * 1.25 - campusActual;
+      // 校区生产差距课时 = 生产指标（对应 G 档）− 预排总数据
+      const gapG1 = state.C - campusSched;
+      const gapG2 = state.C * 1.10 - campusSched;
+      const gapG3 = state.C * 1.25 - campusSched;
       const gapText = v => v <= 0 ? '<span class="tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>';
 
       let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
-        '<div class="stat-card"><div class="k">达到级别</div><div class="v">' + levelBadge + '</div></div>' +
         '<div class="stat-card"><div class="k">第' + (actLatest || '—') + '周完成率</div><div class="v" style="color:var(--indigo)">' + (actLatest > 0 ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (actLatest > 0 ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
         '</div>';
 
       const maxW = Math.max(...rows.map(r => r.w), 0);
