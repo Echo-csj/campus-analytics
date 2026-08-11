@@ -35,6 +35,14 @@
     if (s.indexOf('.') >= 0) s = s.replace(/\.?0+$/, '');
     return s + '%';
   }
+  const TARGET_C_KEY = 'ca_kezu_target_C';
+  function loadTargetC(def) {
+    try { const v = localStorage.getItem(TARGET_C_KEY); if (v != null && v !== '') { const n = parseFloat(v); if (isFinite(n) && n >= 0) return n; } } catch (e) {}
+    return def == null ? 1000 : def;
+  }
+  function saveTargetC(v) {
+    try { localStorage.setItem(TARGET_C_KEY, String(v)); } catch (e) {}
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   // 导出数值格式化：比例(率)以百分数数值(×100)呈现，比类保持原倍数，其余保持数值
@@ -943,7 +951,7 @@
     function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
 
     const months = kezuMonths();
-    const state = { C: 1000, year: 2026, month: 7 };
+    const state = { C: loadTargetC(1000), year: 2026, month: 7 };
     if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
 
     $('#dashBody').innerHTML =
@@ -1045,7 +1053,7 @@
     fillMonths();
     draw();
 
-    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; draw(); });
+    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); draw(); });
     $('#dtMonthSel').addEventListener('change', e => { const p = e.target.value.split('-'); state.year = +p[0]; state.month = +p[1]; draw(); });
   }
 
@@ -1445,7 +1453,7 @@
   }
 
   function renderTarget() {
-    const state = { C: 1000, year: 2026, month: 7, depts: [] };
+    const state = { C: loadTargetC(1000), year: 2026, month: 7, depts: [] };
     let calc = null;
     const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
 
@@ -1821,26 +1829,73 @@
       detail += '</tbody></table></div>';
       if (!hasDetail) detail = '<div class="preview-note">预测月 ' + py + ' 年 ' + pm + ' 月 暂无实际上传数据。上传「周次 / 科组 / 实际预排 / 实际生产」表后，此处显示每周达成跟踪。</div>';
 
-      let sum = '<div class="section-h">科组月度汇总（累计 / 月末预测）</div>';
-      sum += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">月度预测</th><th class="num">累计实际</th><th class="num">累计完成率</th><th class="num">月末预测</th><th class="num">月末完成率</th><th class="num">月末级别</th></tr></thead><tbody>';
+      // 月度汇总宽表：科组 × 周次（W1~Wn）+ 月度预排/实际/完成率
+      const maxW = Math.max(...rows.map(r => r.w || 0), 0);
+      const wkIdx = [];
+      for (let i = 1; i <= maxW; i++) {
+        let weekTgt = 0, weekSched = 0, weekProd = 0;
+        rows.forEach(r => {
+          const rec = (r._list || []).find(x => x.week === i);
+          if (i <= (r.w || 0)) weekTgt += (r.weekly || 0);
+          weekSched += rec ? num(rec.values.scheduled) : 0;
+          weekProd += rec ? num(rec.values.produced) : 0;
+        });
+        wkIdx.push({ weekTgt, weekSched, weekProd });
+      }
+
+      let sum = '<div class="section-h">科组月度汇总（按周展开）</div>';
+      sum += '<div class="table-wrap"><table><thead>';
+      let sumHead = '<tr><th rowspan="2">科组</th>';
+      for (let i = 1; i <= maxW; i++) sumHead += '<th class="num" colspan="4">W' + i + '</th>';
+      sumHead += '<th class="num" rowspan="2">月度预排</th><th class="num" rowspan="2">月度实际</th><th class="num" rowspan="2">月度预排<br>完成率</th><th class="num" rowspan="2">月度实际<br>完成率</th></tr>';
+      let sumSubHead = '<tr>';
+      for (let i = 1; i <= maxW; i++) sumSubHead += '<th class="num">指标</th><th class="num">预排</th><th class="num">实际</th><th class="num">完成率</th>';
+      sumSubHead += '</tr>';
+      sum += sumHead + sumSubHead + '</thead><tbody>';
+
       rows.forEach(r => {
-        sum += '<tr><td>' + esc(r.name) + '</td>' +
-          '<td class="num">' + fmt(r.final) + '</td>' +
-          '<td class="num" style="font-weight:600">' + fmt(r._actual, 1) + '</td>' +
-          '<td class="num">' + pct(r._cumRate) + '</td>' +
-          '<td class="num">' + fmt(r._monthEnd, 1) + '</td>' +
-          '<td class="num">' + pct(r._meRate) + '</td>' +
-          '<td class="num">' + levelBadgeOf(r._meRate) + '</td></tr>';
+        let subjSched = 0, subjProd = 0;
+        let tr = '<tr><td>' + esc(r.name) + '</td>';
+        for (let i = 1; i <= maxW; i++) {
+          const rec = (r._list || []).find(x => x.week === i);
+          const hasWeek = i <= (r.w || 0);
+          const tgt = hasWeek ? (r.weekly || 0) : 0;
+          const sched = rec ? num(rec.values.scheduled) : 0;
+          const prod = rec ? num(rec.values.produced) : 0;
+          subjSched += sched; subjProd += prod;
+          const wkRate = (tgt > 0) ? prod / tgt : null;
+          tr += '<td class="num">' + (hasWeek ? fmt(tgt, 1) : '<span class="muted">—</span>') + '</td>' +
+            '<td class="num">' + (sched > 0 ? fmt(sched, 1) : '<span class="muted">—</span>') + '</td>' +
+            '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
+            '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
+        }
+        const preRate = subjSched > 0 ? subjProd / subjSched : null;
+        const actRate = r.final > 0 ? subjProd / r.final : null;
+        tr += '<td class="num">' + fmt(subjSched, 1) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(subjProd, 1) + '</td>' +
+          '<td class="num">' + (preRate == null ? '<span class="muted">—</span>' : pct(preRate)) + '</td>' +
+          '<td class="num">' + (actRate == null ? '<span class="muted">—</span>' : pct(actRate)) + '</td></tr>';
+        sum += tr;
       });
-      sum += '</tbody>';
-      sum += '<tfoot><tr><td class="total-label">校区总计</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(campusFinal) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(campusActual, 1) + '</td>' +
-        '<td class="num">' + pct(campusCum) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(campusMonthEnd, 1) + '</td>' +
-        '<td class="num">' + pct(campusME) + '</td>' +
-        '<td class="num">' + levelBadgeOf(campusME) + '</td></tr></tfoot>';
-      sum += '</table></div>';
+
+      let campusSched = 0, campusProd = 0;
+      rows.forEach(r => { (r._list || []).forEach(rec => { campusSched += num(rec.values.scheduled); campusProd += num(rec.values.produced); }); });
+      let tfoot = '<tr><td class="total-label">校区总计</td>';
+      for (let i = 1; i <= maxW; i++) {
+        const { weekTgt, weekSched, weekProd } = wkIdx[i - 1];
+        const wkRate = weekTgt > 0 ? weekProd / weekTgt : null;
+        tfoot += '<td class="num">' + fmt(weekTgt, 1) + '</td>' +
+          '<td class="num">' + fmt(weekSched, 1) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(weekProd, 1) + '</td>' +
+          '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
+      }
+      const campusPreRate = campusSched > 0 ? campusProd / campusSched : null;
+      const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
+      tfoot += '<td class="num" style="font-weight:600">' + fmt(campusSched, 1) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(campusProd, 1) + '</td>' +
+        '<td class="num">' + (campusPreRate == null ? '<span class="muted">—</span>' : pct(campusPreRate)) + '</td>' +
+        '<td class="num">' + (campusActRate == null ? '<span class="muted">—</span>' : pct(campusActRate)) + '</td></tr>';
+      sum += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
 
       tw.innerHTML = top + detail + sum;
     }
@@ -1929,7 +1984,7 @@
     fillMonthSelects();
     loadCurrentMonth();
 
-    $('#tC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; recompute(); });
+    $('#tC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); recompute(); });
     $('#tYearSel').addEventListener('change', e => {
       state.year = parseInt(e.target.value, 10); fillMonthSelects(); loadCurrentMonth();
     });
