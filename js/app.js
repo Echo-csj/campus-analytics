@@ -1034,14 +1034,19 @@
         ? kezuTargetWideTableHTML(res, actuals)
         : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
       const hasTrack = maxW > 0 && actuals.length > 0;
-      h += '<div class="section-h-flex">' +
-        '<div class="section-h">科组月度汇总（按周展开）</div>' +
-        (hasTrack ? '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' : '') +
+      h += '<div id="dtExportWrap">' +
+        '<div class="section-h-flex">' +
+          '<div class="section-h">科组月度汇总（按周展开）</div>' +
+          (hasTrack ? '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' : '') +
         '</div>' +
-        '<div id="dtTrackPanel">' + trackTable + '</div>';
+        '<div id="dtTrackPanel">' + trackTable + '</div>' +
+      '</div>';
       $('#dtResult').innerHTML = h;
       if (hasTrack) {
-        $('#dtExportImg').addEventListener('click', () => exportElementImage('#dtTrackPanel', '科组月度汇总_' + pm.year + '_' + pm.month + '.png'));
+        $('#dtExportImg').addEventListener('click', () => {
+          const btn = $('#dtExportImg'); if (btn) btn.style.visibility = 'hidden';
+          exportElementImage('#dtExportWrap', '科组月度汇总_' + pm.year + '_' + pm.month + '.png').then(() => { if (btn) btn.style.visibility = ''; });
+        });
       }
     }
 
@@ -1447,18 +1452,50 @@
     return '<span class="tag warn">未达标</span>';
   }
 
-  // 将 DOM 元素导出为 PNG（依赖 html2canvas CDN）
+  // 将 DOM 元素导出为 PNG（本地 vendor/html2canvas.min.js）
   function exportElementImage(sel, filename) {
     const el = $(sel);
-    if (!el) { toast('未找到要导出的元素'); return; }
-    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请检查网络'); return; }
-    html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true }).then(canvas => {
+    if (!el) { toast('未找到要导出的元素'); return Promise.resolve(); }
+    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return Promise.resolve(); }
+    toast('正在生成图片…');
+    return html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false }).then(canvas => {
       const a = document.createElement('a');
       a.href = canvas.toDataURL('image/png');
       a.download = filename || '看板.png';
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       toast('图片已导出');
     }).catch(err => { toast('导出失败：' + (err && err.message ? err.message : String(err))); });
+  }
+
+  // 生成并下载「科组周度实际数据」Excel 模板（标准表头，与 parseActualFile 对齐）
+  function downloadActualTemplate() {
+    if (typeof XLSX === 'undefined') { toast('表格组件未加载，请刷新页面'); return; }
+    const header = ['年份', '月份', '周次', '科组', '实际预排', '实际生产'];
+    const subjects = ['数学', '英语', '文综', '理综'];
+    const data = [header];
+    // 示例两周（年份/月份按实际跟踪月填写；此处仅作格式示例，可删改）
+    subjects.forEach(s => data.push([2026, 8, 1, s, null, null]));
+    subjects.forEach(s => data.push([2026, 8, 2, s, null, null]));
+    // 额外空白行，便于继续填写
+    for (let i = 0; i < 8; i++) data.push([null, null, null, null, null, null]);
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    ws['!cols'] = header.map(h => ({ wch: Math.max(8, h.length * 2 + 2) }));
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, '周度实际数据');
+    const inst = XLSX.utils.aoa_to_sheet([
+      ['填写说明'],
+      ['1. 在「周度实际数据」表中填写每周实际数据，不要修改第 1 行表头。'],
+      ['2. 年份 / 月份：填写跟踪月份（如 2026、8）；留空则上传时自动用「预测月」填充。'],
+      ['3. 周次：填 1、2、3… 表示第几周。'],
+      ['4. 科组：数学 / 英语 / 文综 / 理综（须与「最佳科组」中的科组名称一致）。'],
+      ['5. 实际预排：该科组该周的实际排课课时（填数字）。'],
+      ['6. 实际生产：该科组该周的实际生产课时（填数字）。'],
+      ['7. 填写完成后，回到系统「科组生产指标 → ⑧ 实际跟踪」上传此文件即可。'],
+    ]);
+    inst['!cols'] = [{ wch: 70 }];
+    XLSX.utils.book_append_sheet(wb, inst, '填写说明');
+    XLSX.writeFile(wb, '科组周度实际数据模板.xlsx');
+    toast('模板已下载：科组周度实际数据模板.xlsx');
   }
 
   // 生成「科组月度汇总（按周展开）」宽表 HTML（复用于核心看板与 target tab）
@@ -1651,7 +1688,7 @@
               <div class="ub-sub" id="at_filelabel">未选择文件</div>
             </div>
           </div>
-          <div class="ub-actions"><button class="btn primary" id="at_parse">解析</button><button class="btn ghost" id="at_clear">清空本月</button></div>
+          <div class="ub-actions"><button class="btn primary" id="at_parse">解析</button><button class="btn ghost" id="at_tpl">下载模板</button><button class="btn ghost" id="at_clear">清空本月</button></div>
           <input type="file" id="at_file" accept=".xlsx,.xls,.csv" hidden />
         </div>
         <div id="at_preview"></div>
@@ -2106,6 +2143,7 @@
       atDrop.addEventListener('drop', e => { e.preventDefault(); atDrop.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) { markActualFile(f); handleActualFile(f); } });
       atFile.addEventListener('change', e => { const f = e.target.files[0]; if (f) { markActualFile(f); handleActualFile(f); } });
       $('#at_parse').addEventListener('click', e => { e.stopPropagation(); const f = atFile.files[0]; if (!f) { toast('请先选择文件'); return; } handleActualFile(f); });
+      const atTpl = $('#at_tpl'); if (atTpl) atTpl.addEventListener('click', e => { e.stopPropagation(); downloadActualTemplate(); });
       $('#at_clear').addEventListener('click', () => {
         const { y, m } = predictedYM();
         const list = STORE.list('kezuActual').filter(r => r.year === y && r.month === m);
