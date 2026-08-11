@@ -929,6 +929,36 @@
   }
 
   // 核心看板子页：科组生产预测（用已完成月数据，预测下月指标）
+  // 根据当前日期，按"自然周(周一至周日)+人工月"规则推算 X月第X周
+  // 规则：自然月最后一天若在周一/周二 -> 该周归新月份(本月止于上一周日)；
+  //       若在周三及之后 -> 该周归本月(止于本周日)。周日即月度最后一天。
+  function currentManualWeek(date) {
+    function manualLastDay(Y, m) {
+      const L = new Date(Y, m, 0); // 自然月最后一天
+      const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
+      if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
+      return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
+    }
+    function manualMonthOf(d) {
+      let Y = d.getFullYear(), m = d.getMonth() + 1;
+      const ML = manualLastDay(Y, m);
+      if (d <= ML) {
+        let pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
+        const prevML = manualLastDay(pY, pm0);
+        if (d > prevML) return { year: Y, month: m };
+        return { year: pY, month: pm0 };
+      }
+      let nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
+      return { year: nY, month: nm };
+    }
+    const mm = manualMonthOf(date);
+    let pY = mm.year, pm0 = mm.month - 1; if (pm0 < 1) { pm0 = 12; pY = mm.year - 1; }
+    const prevML = manualLastDay(pY, pm0);
+    const MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1); // 人工月首周一
+    const dayDiff = Math.round((date - MS) / 86400000);
+    return { year: mm.year, month: mm.month, week: Math.floor(dayDiff / 7) + 1 };
+  }
+
   function renderKezuTargetDash() {
     const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
     function kezuMonths() {
@@ -949,23 +979,18 @@
       return (typeof v === 'number' && isFinite(v)) ? v : null;
     }
     function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
-    function actualSummary(py, pm) {
+    function actualSummary(py, pm, uptoWeek) {
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
-      let latest = 0, campusActual = 0, campusSched = 0;
+      let campusActual = 0, campusSched = 0, hasData = false;
       actuals.forEach(r => {
         const w = +r.week || 0;
-        if (w > latest) latest = w;
+        if (uptoWeek == null || w <= uptoWeek) {
+          campusActual += num(r.values && r.values.produced);
+          campusSched += num(r.values && r.values.scheduled);
+          hasData = true;
+        }
       });
-      if (latest > 0) {
-        actuals.forEach(r => {
-          const w = +r.week || 0;
-          if (w <= latest) {
-            campusActual += num(r.values && r.values.produced);
-            campusSched += num(r.values && r.values.scheduled);
-          }
-        });
-      }
-      return { latest, campusActual, campusSched };
+      return { campusActual, campusSched, hasData };
     }
 
     const months = kezuMonths();
@@ -1010,7 +1035,8 @@
       else { const diff = H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
       $('#dtConsist').innerHTML = consistHtml;
 
-      const { latest: actLatest, campusActual, campusSched } = actualSummary(pm.year, pm.month);
+      const cw = currentManualWeek(new Date()); // 当前日期推算：X月第X周（不再依赖数据残留）
+      const { campusActual, campusSched, hasData } = actualSummary(cw.year, cw.month, cw.week);
       const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
       // 校区生产差距课时 = 生产指标（对应 G 档）− 预排总数据
       const gapG1 = state.C - campusSched;
@@ -1022,10 +1048,10 @@
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
-        '<div class="stat-card"><div class="k">第' + (actLatest || '—') + '周完成率</div><div class="v" style="color:var(--indigo)">' + (actLatest > 0 ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
-        '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (campusSched > 0 ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">' + cw.month + '月第' + cw.week + '周完成率</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
         '</div>';
 
       const maxW = Math.max(...rows.map(r => r.w), 0);
