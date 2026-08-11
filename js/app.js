@@ -1295,6 +1295,9 @@
     function renderDeptInputs() {
       const wrap = $('#tDeptWrap');
       if (!state.depts.length) { wrap.innerHTML = '<div class="preview-note">暂无科组，请点击「读入该月科组数据」或「添加科组」。</div>'; return; }
+      const S = state.depts.reduce((a, d) => a + (d.s || 0), 0);
+      const H = state.depts.reduce((a, d) => a + (d.h || 0), 0);
+      const Wtot = state.depts.reduce((a, d) => a + (d.w || 0), 0);
       let h = '<div class="table-wrap"><table><thead><tr><th>科组名称</th><th class="num">单科数 sᵢ</th><th class="num">上月课时 hᵢ</th><th class="num">周数 wᵢ</th><th></th></tr></thead><tbody>';
       state.depts.forEach((d, i) => {
         h += '<tr>' +
@@ -1304,7 +1307,13 @@
           '<td class="num"><input class="cell-in mono" data-i="' + i + '" data-k="w" type="number" min="1" step="any" value="' + d.w + '"></td>' +
           '<td><button class="row-del" data-i="' + i + '" title="删除">×</button></td></tr>';
       });
-      h += '</tbody></table></div>';
+      h += '</tbody>';
+      h += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">' + fmt(S) + '</td>' +
+        '<td class="num">' + fmt(H) + '</td>' +
+        '<td class="num">' + fmt(Wtot) + '</td>' +
+        '<td></td></tr></tfoot>';
+      h += '</table></div>';
       wrap.innerHTML = h;
       wrap.querySelectorAll('input').forEach(inp => inp.addEventListener('input', onDeptInput));
       wrap.querySelectorAll('.row-del').forEach(b => b.addEventListener('click', () => {
@@ -1361,7 +1370,16 @@
           '<td class="num">' + fmt(r.predB) + '</td>' +
           '<td class="num" style="color:var(--indigo);font-weight:600">' + fmt(r.avg) + '</td></tr>';
       });
-      ch += '</tbody></table></div>';
+      ch += '</tbody>';
+      ch += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">' + fmt(S) + '</td>' +
+        '<td class="num">100%</td>' +
+        '<td class="num">' + fmt(C) + '</td>' +
+        '<td class="num">' + fmt(H) + '</td>' +
+        '<td class="num">100%</td>' +
+        '<td class="num">' + fmt(C) + '</td>' +
+        '<td class="num" style="color:var(--indigo);font-weight:600">' + fmt(C) + '</td></tr></tfoot>';
+      ch += '</table></div>';
       $('#tCalcWrap').innerHTML = ch;
 
       // ④ 对齐与区间控制
@@ -1391,7 +1409,12 @@
           '<td class="num" style="color:var(--green);font-weight:600">' + fmt(commonW, 2) + '</td>' +
           '<td class="num" style="font-weight:600">' + fmt(final_i) + '</td></tr>';
       });
-      ah += '</tbody></table></div>';
+      ah += '</tbody>';
+      ah += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">—</td>' +
+        '<td class="num" style="color:var(--green);font-weight:600">' + fmt(commonW, 2) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(sumFinal) + '</td></tr></tfoot>';
+      ah += '</table></div>';
       $('#tAlignWrap').innerHTML = ah;
 
       // ⑤ G 档倒推 + 完成率 / 达到级别
@@ -1418,7 +1441,13 @@
           '<td class="num">' + fmt(r.G2) + '</td>' +
           '<td class="num">' + fmt(r.G3) + '</td></tr>';
       });
-      gh += '</tbody></table></div>';
+      gh += '</tbody>';
+      gh += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">' + fmt(S) + '</td>' +
+        '<td class="num">' + fmt(C * Gcfg.G1) + '</td>' +
+        '<td class="num">' + fmt(C * Gcfg.G2) + '</td>' +
+        '<td class="num">' + fmt(C * Gcfg.G3) + '</td></tr></tfoot>';
+      gh += '</table></div>';
       $('#tGWrap').innerHTML = gh;
 
       // ⑥ 最终预测结果
@@ -1442,7 +1471,14 @@
           '<td class="num">' + pct(completion) + '</td>' +
           '<td class="num">' + levelBadge + '</td></tr>';
       });
-      fh += '</tbody></table></div>';
+      const sumWeeklyFinal = rows.reduce((a, r) => a + r.weekly, 0);
+      fh += '</tbody>';
+      fh += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num">' + fmt(sumWeeklyFinal, 1) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(sumFinal) + '</td>' +
+        '<td class="num">' + pct(completion) + '</td>' +
+        '<td class="num">' + levelBadge + '</td></tr></tfoot>';
+      fh += '</table></div>';
       $('#tFinalWrap').innerHTML = fh;
 
       // 每周分解
@@ -1456,7 +1492,13 @@
           for (let i = 1; i <= maxW; i++) wh += '<td class="num">' + (i <= r.w ? fmt(r.weekly, 1) : '<span class="muted">—</span>') + '</td>';
           wh += '</tr>';
         });
-        wh += '</tbody></table></div>';
+        const wkTotals = [];
+        for (let i = 1; i <= maxW; i++) { let t = 0; rows.forEach(r => { if (i <= r.w) t += r.weekly; }); wkTotals.push(t); }
+        wh += '</tbody>';
+        wh += '<tfoot><tr><td class="total-label">校区总计</td>';
+        for (let i = 1; i <= maxW; i++) wh += '<td class="num">' + fmt(wkTotals[i - 1], 1) + '</td>';
+        wh += '</tr></tfoot>';
+        wh += '</table></div>';
         $('#tWeeklyWrap').innerHTML = wh;
       } else {
         $('#tWeeklyWrap').innerHTML = '<div class="preview-note">请填写科组周数以生成每周分解。</div>';
@@ -1482,7 +1524,7 @@
         '</div>';
       $('#tSummaryWrap').innerHTML = sh;
 
-      calc = { rows, C, S, H, commonW, sumFinal, completion, achieved, src };
+      calc = { rows, C, S, H, commonW, sumFinal, completion, achieved, src, sumWeeklyFinal: rows.reduce((a, r) => a + r.weekly, 0) };
     }
 
     function exportFinal() {
@@ -1493,7 +1535,7 @@
       calc.rows.forEach(r => {
         lines.push([r.name, r.s, r.w, r2(r.weekly), r2(r.final), Math.round(calc.completion * 10000) / 100 + '%', calc.achieved, r2(r.G1), r2(r.G2), r2(r.G3)].join(','));
       });
-      lines.push(['校区汇总', calc.S, '', '', '', Math.round(calc.completion * 10000) / 100 + '%', calc.achieved, '', '', ''].join(','));
+      lines.push(['校区总计', calc.S, '', r2(calc.sumWeeklyFinal), r2(calc.sumFinal), Math.round(calc.completion * 10000) / 100 + '%', calc.achieved, r2(calc.C * 1.0), r2(calc.C * 1.1), r2(calc.C * 1.25)].join(','));
       lines.push(['', '', '', '校区预测总盘', r2(calc.sumFinal), '校区生产指标C', r2(calc.C), '', '', ''].join(','));
       return '﻿' + lines.join('\n');
     }

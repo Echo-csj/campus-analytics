@@ -128,6 +128,9 @@ th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--bor
 thead th { background: var(--bg-subtle); font-weight: 600; color: var(--text-2); font-size: 12px; position: sticky; top: 0; }
 tbody tr:hover { background: var(--bg-subtle); }
 td.num, th.num { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+table tfoot td { font-weight: 600; background: var(--indigo-soft); color: var(--indigo); border-top: 2px solid #c7d2fe; }
+table tfoot td.total-label { font-weight: 700; }
+table tfoot td .muted { color: var(--text-3); }
 .tag { display: inline-block; padding: 1px 7px; border-radius: 20px; font-size: 11px; font-weight: 600; background: var(--bg-subtle); color: var(--text-2); }
 .tag.me { background: var(--indigo-soft); color: var(--indigo); }
 .tag.warn { background: #fef3c7; color: var(--amber); }
