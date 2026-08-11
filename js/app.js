@@ -1377,6 +1377,73 @@
     return { S, H, rows, meanW, sum0, lower, upper, commonW, adjNote, sumFinal, completion, achieved, Gcfg };
   }
 
+  // 解析「科组每周实际生产 / 预排」Excel/CSV（长表：周次 × 科组 × 实际预排 × 实际生产）
+  function parseActualFile(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array', cellDates: true });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+          const norm = c => (c == null ? '' : String(c)).trim().toLowerCase().replace(/\s+/g, '');
+          const aliases = {
+            week: ['周次', '周', 'week'],
+            subject: ['科组', '学科', '科目', 'subject'],
+            scheduled: ['实际预排', '预排', '排课', '计划课时', '预排课时', '预排生产'],
+            produced: ['实际生产', '生产课时', '实际生产课时', '实际产出', 'produced'],
+            year: ['年份', '年', 'year'],
+            month: ['月份', '月', 'month'],
+          };
+          function matchCol(cells) {
+            const map = {};
+            cells.forEach((cell, idx) => {
+              const t = norm(cell);
+              if (!t) return;
+              for (const key in aliases) {
+                if (map[key] != null) continue;
+                if (aliases[key].some(a => t === a || t.indexOf(a) >= 0)) { map[key] = idx; break; }
+              }
+            });
+            return map;
+          }
+          let headerIdx = -1, headerMap = null;
+          for (let i = 0; i < Math.min(12, aoa.length); i++) {
+            const m = matchCol(aoa[i]);
+            if (m.subject != null && m.week != null && (m.scheduled != null || m.produced != null)) { headerIdx = i; headerMap = m; break; }
+          }
+          if (headerIdx < 0) { reject(new Error('未找到含「周次 / 科组 / 实际预排 / 实际生产」的表头行（前 12 行内）')); return; }
+          const toNum = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[, ]/g, '')); return isFinite(n) ? n : 0; };
+          const records = [], errors = [], warnings = [];
+          for (let i = headerIdx + 1; i < aoa.length; i++) {
+            const row = aoa[i];
+            if (!row || row.every(c => c == null || String(c).trim() === '')) continue;
+            const get = k => row[headerMap[k]];
+            const subject = (get('subject') == null ? '' : String(get('subject')).trim());
+            const week = Math.round(toNum(get('week')));
+            const scheduled = toNum(get('scheduled'));
+            const produced = toNum(get('produced'));
+            const year = get('year') != null && /\d{4}/.test(String(get('year'))) ? +String(get('year')).match(/\d{4}/)[0] : null;
+            const month = get('month') != null ? Math.round(toNum(get('month'))) : null;
+            if (!subject) { errors.push({ msg: '第 ' + (i + 1) + ' 行：缺少科组名称，已跳过' }); continue; }
+            if (!week || week < 1) { errors.push({ msg: '第 ' + (i + 1) + ' 行（' + subject + '）：周次无效，已跳过' }); continue; }
+            records.push({ year, month, week, subject, scheduled: scheduled || 0, produced: produced || 0 });
+          }
+          resolve({ records, errors, warnings });
+        } catch (err) { reject(err); }
+      };
+      reader.readAsArrayBuffer(file);
+    });
+  }
+  function levelOf(c) { return c >= 1.25 ? 'G3' : c >= 1.10 ? 'G2' : c >= 1.00 ? 'G1' : '未达标'; }
+  function levelBadgeOf(c) {
+    const lv = levelOf(c);
+    if (lv === 'G3') return '<span class="tag" style="background:#4F46E5;color:#fff">G3（125%）</span>';
+    if (lv === 'G2') return '<span class="tag warn">G2（110%）</span>';
+    if (lv === 'G1') return '<span class="tag ok">G1（100%）</span>';
+    return '<span class="tag warn">未达标</span>';
+  }
+
   function renderTarget() {
     const state = { C: 1000, year: 2026, month: 7, depts: [] };
     let calc = null;
@@ -1465,6 +1532,27 @@
         <div class="panel-title">⑦ 校区汇总</div>
         <div class="panel-desc">校区级关键指标一览。</div>
         <div id="tSummaryWrap"></div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-title">⑧ 实际跟踪 · 预测 vs 实际（科组生产达成）</div>
+        <div class="panel-desc">上传科组每周实际数据后，系统按当前「参考月份 + 1」所对应的<b>预测月</b>叠加对比：预测周目标 = 月度预测 ÷ 周数；对比实际预排与实际生产，算周达成率与预排达成率，并预测月末达成。上传表头需含：周次、科组、实际预排、实际生产（年份/月份可选，缺省用预测月）。</div>
+        <div class="meta-row" style="margin-bottom:10px">
+          <div class="field"><label>跟踪月份（预测月 = 参考月 + 1）</label><span id="atYM" class="mono" style="font-weight:600"></span></div>
+        </div>
+        <div class="upload-bar" id="at_drop">
+          <div class="ub-left">
+            <div class="ub-ico" id="at_ubico">${UPLOAD_SVG}</div>
+            <div>
+              <div class="ub-title">拖入或点击上传 xlsx / xls / csv（每周实际数据）</div>
+              <div class="ub-sub" id="at_filelabel">未选择文件</div>
+            </div>
+          </div>
+          <div class="ub-actions"><button class="btn primary" id="at_parse">解析</button><button class="btn ghost" id="at_clear">清空本月</button></div>
+          <input type="file" id="at_file" accept=".xlsx,.xls,.csv" hidden />
+        </div>
+        <div id="at_preview"></div>
+        <div id="atTrackWrap"></div>
       </div>`;
     $('#content').innerHTML = html;
 
@@ -1668,6 +1756,127 @@
       $('#tSummaryWrap').innerHTML = sh;
 
       calc = { rows, C, S, H, commonW, sumFinal, completion, achieved, src, sumWeeklyFinal: rows.reduce((a, r) => a + r.weekly, 0) };
+      renderTrack();
+    }
+
+    function predictedYM() {
+      let y = state.year, m = state.month + 1;
+      if (m > 12) { m = 1; y++; }
+      return { y, m };
+    }
+
+    function renderTrack() {
+      const tw = $('#atTrackWrap'); if (!tw) return;
+      const { y: py, m: pm } = predictedYM();
+      const ymEl = $('#atYM'); if (ymEl) ymEl.textContent = py + ' 年 ' + pm + ' 月';
+      const res = computeKezuTarget(state.depts, state.C);
+      const rows = res.rows;
+      const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
+      const bySubj = {};
+      actuals.forEach(r => { (bySubj[r.dimension] = bySubj[r.dimension] || []).push(r); });
+
+      let campusActual = 0, campusFinal = res.sumFinal, campusMonthEnd = 0;
+      rows.forEach(r => {
+        const list = (bySubj[r.name] || []).slice().sort((a, b) => (a.week - b.week));
+        let subjActual = 0;
+        list.forEach(rec => { subjActual += num(rec.values && rec.values.produced); });
+        const cumRate = r.final > 0 ? subjActual / r.final : 0;
+        const actualWeeks = list.length;
+        const remaining = Math.max(0, (r.w || 0) - actualWeeks);
+        const monthEnd = subjActual + remaining * r.weekly;
+        r._list = list; r._actual = subjActual; r._cumRate = cumRate;
+        r._monthEnd = monthEnd; r._meRate = r.final > 0 ? monthEnd / r.final : 0; r._actualWeeks = actualWeeks;
+        campusActual += subjActual; campusMonthEnd += monthEnd;
+      });
+
+      const campusCum = campusFinal > 0 ? campusActual / campusFinal : 0;
+      const campusME = campusFinal > 0 ? campusMonthEnd / campusFinal : 0;
+      let top = '<div class="stat-grid" style="margin:6px 0 14px">';
+      top += '<div class="stat-card"><div class="k">跟踪月份</div><div class="v">' + py + '/' + pm + '</div></div>';
+      top += '<div class="stat-card"><div class="k">校区累计完成率</div><div class="v" style="color:var(--indigo)">' + pct(campusCum) + '</div></div>';
+      top += '<div class="stat-card"><div class="k">校区月末预测完成率</div><div class="v" style="color:var(--indigo)">' + pct(campusME) + '</div></div>';
+      top += '<div class="stat-card"><div class="k">月末预测达到级别</div><div class="v">' + levelBadgeOf(campusME) + '</div></div>';
+      top += '</div>';
+
+      let detail = '<div class="section-h">周度明细（科组 × 周）</div>';
+      detail += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">周次</th><th class="num">预测周目标</th><th class="num">实际预排</th><th class="num">实际生产</th><th class="num">周达成率</th><th class="num">预排达成率</th></tr></thead><tbody>';
+      let hasDetail = false;
+      rows.forEach(r => {
+        (r._list || []).forEach(rec => {
+          hasDetail = true;
+          const sched = num(rec.values && rec.values.scheduled);
+          const prod = num(rec.values && rec.values.produced);
+          const tgt = r.weekly;
+          const wkRate = tgt > 0 ? prod / tgt : 0;
+          const schRate = sched > 0 ? prod / sched : null;
+          detail += '<tr><td>' + esc(r.name) + '</td>' +
+            '<td class="num">第' + rec.week + '周</td>' +
+            '<td class="num">' + fmt(tgt, 1) + '</td>' +
+            '<td class="num">' + fmt(sched, 1) + '</td>' +
+            '<td class="num" style="font-weight:600">' + fmt(prod, 1) + '</td>' +
+            '<td class="num">' + pct(wkRate) + '</td>' +
+            '<td class="num">' + (schRate == null ? '<span class="muted">—</span>' : pct(schRate)) + '</td></tr>';
+        });
+      });
+      detail += '</tbody></table></div>';
+      if (!hasDetail) detail = '<div class="preview-note">预测月 ' + py + ' 年 ' + pm + ' 月 暂无实际上传数据。上传「周次 / 科组 / 实际预排 / 实际生产」表后，此处显示每周达成跟踪。</div>';
+
+      let sum = '<div class="section-h">科组月度汇总（累计 / 月末预测）</div>';
+      sum += '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">月度预测</th><th class="num">累计实际</th><th class="num">累计完成率</th><th class="num">月末预测</th><th class="num">月末完成率</th><th class="num">月末级别</th></tr></thead><tbody>';
+      rows.forEach(r => {
+        sum += '<tr><td>' + esc(r.name) + '</td>' +
+          '<td class="num">' + fmt(r.final) + '</td>' +
+          '<td class="num" style="font-weight:600">' + fmt(r._actual, 1) + '</td>' +
+          '<td class="num">' + pct(r._cumRate) + '</td>' +
+          '<td class="num">' + fmt(r._monthEnd, 1) + '</td>' +
+          '<td class="num">' + pct(r._meRate) + '</td>' +
+          '<td class="num">' + levelBadgeOf(r._meRate) + '</td></tr>';
+      });
+      sum += '</tbody>';
+      sum += '<tfoot><tr><td class="total-label">校区总计</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(campusFinal) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(campusActual, 1) + '</td>' +
+        '<td class="num">' + pct(campusCum) + '</td>' +
+        '<td class="num" style="font-weight:600">' + fmt(campusMonthEnd, 1) + '</td>' +
+        '<td class="num">' + pct(campusME) + '</td>' +
+        '<td class="num">' + levelBadgeOf(campusME) + '</td></tr></tfoot>';
+      sum += '</table></div>';
+
+      tw.innerHTML = top + detail + sum;
+    }
+
+    function handleActualFile(file) {
+      const pv = $('#at_preview'); if (!pv) return;
+      pv.innerHTML = '<div class="preview-note">解析中…</div>';
+      parseActualFile(file).then(res => {
+        const { y, m } = predictedYM();
+        if (res.records.length) res.records.forEach(r => { if (!r.year) r.year = y; if (!r.month) r.month = m; });
+        renderActualPreview(res);
+      }).catch(err => { pv.innerHTML = '<div class="preview-note warn-cell">解析失败：' + esc(err && err.message ? err.message : String(err)) + '</div>'; });
+    }
+    function renderActualPreview(res) {
+      const { records, errors } = res;
+      const { y, m } = predictedYM();
+      let h = '<div class="bk-validate">';
+      if (errors.length) h += '<div class="bk-err"><b>✕ 校验提示（' + errors.length + ' 项）</b><ul>' + errors.slice(0, 20).map(e => '<li>' + esc(e.msg) + '</li>').join('') + '</ul></div>';
+      else h += '<div class="bk-ok">✓ 无错误</div>';
+      h += '</div>';
+      h += '<div class="preview-note">已解析 <b>' + records.length + '</b> 条（预测月 = ' + y + ' 年 ' + m + ' 月；缺年份/月份自动填充）</div>';
+      h += '<div class="row" style="margin-top:10px"><button class="btn primary" id="at_confirm"' + (errors.length ? ' disabled' : '') + '>确认入库（' + records.length + ' 条）</button><button class="btn ghost" id="at_cancel">取消</button></div>';
+      const pv = $('#at_preview'); pv.innerHTML = h;
+      const cb = $('#at_confirm');
+      if (cb && !errors.length) cb.addEventListener('click', () => {
+        const ym = records.length ? (records[0].year + ' 年 ' + records[0].month + ' 月') : '';
+        let n = 0;
+        records.forEach(r => {
+          STORE.upsert({ stream: 'kezuActual', year: r.year, month: r.month, week: r.week, dimension: r.subject, values: { scheduled: r.scheduled, produced: r.produced }, importedAt: Date.now() });
+          n++;
+        });
+        toast(n + ' 条实际数据已入库（' + ym + '）');
+        pv.innerHTML = '';
+        renderTrack();
+      });
+      const xb = $('#at_cancel'); if (xb) xb.addEventListener('click', () => { pv.innerHTML = ''; });
     }
 
     function exportFinal() {
@@ -1732,6 +1941,32 @@
     $('#tAdd').addEventListener('click', () => { state.depts.push({ name: '新科组', s: 1, h: 0, w: 4 }); renderDeptInputs(); recompute(); });
     $('#tCopy').addEventListener('click', () => copyText(exportFinal()));
     $('#tCsv').addEventListener('click', () => downloadCSV(exportFinal()));
+
+    // —— ⑧ 实际跟踪：上传每周实际数据 ——
+    const atDrop = $('#at_drop'), atFile = $('#at_file');
+    function markActualFile(file) {
+      const lbl = $('#at_filelabel');
+      if (atDrop) atDrop.classList.add('has-file');
+      if (lbl) lbl.innerHTML = '已选文件：<b>' + esc(file.name) + '</b> · 点击重新选择';
+    }
+    if (atDrop) {
+      atDrop.addEventListener('click', e => { if (e.target.closest('button')) return; atFile.click(); });
+      atDrop.addEventListener('dragover', e => { e.preventDefault(); atDrop.classList.add('drag'); });
+      atDrop.addEventListener('dragleave', () => atDrop.classList.remove('drag'));
+      atDrop.addEventListener('drop', e => { e.preventDefault(); atDrop.classList.remove('drag'); const f = e.dataTransfer.files[0]; if (f) { markActualFile(f); handleActualFile(f); } });
+      atFile.addEventListener('change', e => { const f = e.target.files[0]; if (f) { markActualFile(f); handleActualFile(f); } });
+      $('#at_parse').addEventListener('click', e => { e.stopPropagation(); const f = atFile.files[0]; if (!f) { toast('请先选择文件'); return; } handleActualFile(f); });
+      $('#at_clear').addEventListener('click', () => {
+        const { y, m } = predictedYM();
+        const list = STORE.list('kezuActual').filter(r => r.year === y && r.month === m);
+        if (!list.length) { toast('本月暂无实际数据'); return; }
+        if (window.confirm('确认清空 ' + y + ' 年 ' + m + ' 月 的全部实际数据（' + list.length + ' 条）？')) {
+          list.forEach(r => STORE.remove('kezuActual', r.year, r.month, r.week, r.dimension));
+          toast('已清空本月实际数据');
+          renderTrack();
+        }
+      });
+    }
   }
 
   // —— 图表 ——
