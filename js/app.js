@@ -1008,6 +1008,8 @@
         return;
       }
       const pm = predMonth(state.year, state.month);
+      const predWeeks = AGG.manualMonthWeekCount(pm.year, pm.month);
+      depts.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
       $('#dtPred').value = pm.year + ' 年 ' + pm.month + ' 月';
       const res = computeKezuTarget(depts, state.C);
       const { S, H, rows, commonW, sumFinal, completion, achieved, Gcfg } = res;
@@ -1751,7 +1753,7 @@
 
       <div class="panel">
         <div class="panel-title">科组输入（来自最佳科组，可编辑）</div>
-        <div class="panel-desc">单科数 / 课时取自参考月「最佳科组」；周数为该科组当月周数（用于周度分解）。可增删科组或在表格内直接修改。</div>
+        <div class="panel-desc">单科数 / 课时取自参考月「最佳科组」；周数默认为【预测月】的自然周数（用于周度分解），可微调。可增删科组或在表格内直接修改。</div>
         <div id="tDeptWrap"></div>
         <div class="row" style="margin-top:12px">
           <button class="btn" id="tAdd">＋ 添加科组</button>
@@ -2225,7 +2227,12 @@
     }
     function loadCurrentMonth() {
       const loaded = loadMonth(state.year, state.month);
-      if (loaded) { state.depts = loaded; toast('已读入 ' + loaded.length + ' 个科组（' + state.year + ' 年 ' + state.month + ' 月）'); }
+      if (loaded) {
+        const pm = predMonth(state.year, state.month);
+        const predWeeks = AGG.manualMonthWeekCount(pm.year, pm.month);
+        loaded.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
+        state.depts = loaded; toast('已读入 ' + loaded.length + ' 个科组（' + state.year + ' 年 ' + state.month + ' 月）');
+      }
       else { state.depts = []; toast('「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据'); }
       renderDeptInputs(); recompute();
     }

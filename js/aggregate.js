@@ -88,6 +88,15 @@
     const wk1Mon = new Date(y, m - 1, 1 + monOffset);
     return new Date(wk1Mon.getFullYear(), wk1Mon.getMonth(), wk1Mon.getDate() + (wk - 1) * 7 + 6);
   }
+  // 人工月周数：该人工月含多少个自然周（周一至周日），纯日历推导
+  function manualMonthWeekCount(Y, m) {
+    let pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
+    const prevML = manualLastDay(pY, pm0);
+    const MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1); // 人工月首周一
+    const ML = manualLastDay(Y, m);
+    const diff = Math.round((ML - MS) / 86400000);
+    return (diff + 1) / 7; // diff 恒为 7 的倍数 → 整数
+  }
   // 取各区各「人工月」的月度周报（人工月最后一周），供核心看板年度/季度看板使用
   function manualMonthEndWeeklies(weeklyRecs) {
     const byMM = {};
@@ -470,7 +479,7 @@
 
   CA.aggregate = {
     withMonthEnd, monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
-    manualLastDay, manualMonthOf, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
+    manualLastDay, manualMonthOf, manualMonthWeekCount, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate, evalExpr, normalizeRatio,
     YEARLY_RULES, yearlyAggregate,
   };
