@@ -942,6 +942,9 @@
     return { year: mm.year, month: mm.month, week: Math.floor(dayDiff / 7) + 1 };
   }
 
+  // 预测月 = 参考月 + 1（跨年归到次年 1 月）。模块级共享，renderKezuTargetDash 与 renderTarget 均使用。
+  function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
+
   function renderKezuTargetDash() {
     const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
     function kezuMonths() {
@@ -961,7 +964,6 @@
       const v = rec.values && rec.values.v1MonthProduced;
       return (typeof v === 'number' && isFinite(v)) ? v : null;
     }
-    function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
     function actualSummary(py, pm, uptoWeek) {
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
       let campusActual = 0, campusSched = 0, hasData = false;
