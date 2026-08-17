@@ -146,22 +146,18 @@
 
   // —— 上传面板（通用）——
   function uploadPanelHTML(stream) {
-    const names = { weekly: 'DOS 周报', kezu: '科组周报', kpi: '教师周报' };
-    const desc = stream === 'weekly'
-      ? '上传 DOS 周报 xlsx（含「数据统计表」工作表），按标签一键提取。'
-      : '上传' + names[stream] + ' xlsx（首行表头，每行一个' + (stream === 'kezu' ? '科组' : '教师') + '），按表头一键提取。';
     const p = inferPeriod();
-    const defaultLabel = (stream === 'weekly' ? (p.year + '年' + p.month + '月 ') : '') + '第' + p.week + '周';
+    const defaultLabel = '第' + p.week + '周';
     const uploadIco = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg>';
     return `
       <div class="panel">
-        <div class="panel-title">上传并一键提取 · ${names[stream]}</div>
-        <div class="panel-desc">${desc}</div>
+        <div class="panel-title">上传并一键提取 · 教师周报</div>
+        <div class="panel-desc">上传教师周报 xlsx（首行表头，每行一个教师），按表头一键提取。</div>
         <div class="upload-bar" id="drop_${stream}">
           <div class="ub-left">
             <div class="ub-ico" id="ubico_${stream}">${uploadIco}</div>
             <div>
-              <div class="ub-title">拖入或点击上传 ${names[stream]} xlsx</div>
+              <div class="ub-title">拖入或点击上传 教师周报 xlsx</div>
               <div class="ub-sub" id="filelabel_${stream}">默认归属：<b>${defaultLabel}</b> · 可修改</div>
             </div>
           </div>
@@ -204,7 +200,7 @@
     const ctx = { year: yr, month: mo, week: wk };
     const preview = $('#preview_' + stream);
     preview.innerHTML = '<div class="preview-note">解析中…</div>';
-    // 周报入库已统一在「数据源 → 历史周报批量入库」完成；此处仅处理科组/教师维度周报
+    // 周报入库已统一在「数据源 → 历史周报批量入库」完成；此处仅处理教师(KPI)维度周报
     PARSER.parseDimension(file, stream, ctx).then(res => {
       pending = { stream, ctx, rows: res.rows, unmatchedCols: res.unmatchedCols };
       renderDimensionPreview(stream, res);
@@ -216,13 +212,13 @@
     let html = '<div class="preview-note">已提取 <b>' + res.rows.length + '</b> 条';
     if (res.unmatchedCols.length) html += ' ｜ <span class="warn-cell">未匹配列：' + res.unmatchedCols.join('、') + '</span>';
     html += '</div><div class="table-wrap"><table><thead><tr>';
-    const cols = stream === 'kezu' ? SCHEMA.kezuFields : SCHEMA.kpiFields;
-    html += '<th>' + (stream === 'kezu' ? '科组' : '教师') + '</th>';
-    cols.filter(c => c.key !== 'subjectGroup' || stream === 'kpi').forEach(c => html += '<th class="num">' + c.label + '</th>');
+    const cols = SCHEMA.kpiFields;
+    html += '<th>教师</th>';
+    cols.forEach(c => html += '<th class="num">' + c.label + '</th>');
     html += '</tr></thead><tbody>';
     res.rows.forEach(r => {
       html += '<tr><td>' + r.dimension + '</td>';
-      cols.forEach(c => { if (c.key === 'subjectGroup' && stream !== 'kpi') return; html += '<td class="num">' + (c.type === 'ratio' ? pct(r.values[c.key]) : fmt(r.values[c.key])) + '</td>'; });
+      cols.forEach(c => { html += '<td class="num">' + (c.type === 'ratio' ? pct(r.values[c.key]) : fmt(r.values[c.key])) + '</td>'; });
       html += '</tr>';
     });
     html += '</tbody></table></div>';
@@ -232,7 +228,7 @@
       let n = 0;
       pending.rows.forEach(r => { STORE.upsert({ stream: pending.stream, year: pending.ctx.year, month: pending.ctx.month, week: pending.ctx.week, dimension: r.dimension, values: r.values, importedAt: Date.now() }); n++; });
       toast(n + ' 条已入库'); pending = null;
-      if (stream === 'kezu') renderKezu(); else renderKpi();
+      renderKpi();
     });
     $('#cancel_' + stream).addEventListener('click', () => { $('#preview_' + stream).innerHTML = ''; pending = null; });
   }
@@ -945,25 +941,27 @@
   // 预测月 = 参考月 + 1（跨年归到次年 1 月）。模块级共享，renderKezuTargetDash 与 renderTarget 均使用。
   function predMonth(y, m) { let mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
 
+  // 「科组生产预测」相关模块（核心看板 / 科组生产指标）共用的助手，提升为模块级以避免重复实现
+  const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
+  function kezuMonths() {
+    const set = {};
+    STORE.list('bestkezu').forEach(r => { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
+    return Object.values(set).sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  }
+  function loadMonth(y, m) {
+    const recs = STORE.list('bestkezu').filter(r => r.year === y && r.month === m);
+    if (!recs.length) return null;
+    return recs.map(r => { const v = r.values || {}; return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 }; });
+  }
+  function dataSourceProd(y, m) {
+    const me = AGG.monthEndWeeklies(STORE.list('weekly'));
+    const rec = me.find(r => r.year === y && r.month === m);
+    if (!rec) return null;
+    const v = rec.values && rec.values.v1MonthProduced;
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  }
+
   function renderKezuTargetDash() {
-    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
-    function kezuMonths() {
-      const set = {};
-      STORE.list('bestkezu').forEach(r => { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
-      return Object.values(set).sort((a, b) => (a.year - b.year) || (a.month - b.month));
-    }
-    function loadMonth(y, m) {
-      const recs = STORE.list('bestkezu').filter(r => r.year === y && r.month === m);
-      if (!recs.length) return null;
-      return recs.map(r => { const v = r.values || {}; return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 }; });
-    }
-    function dataSourceProd(y, m) {
-      const me = AGG.monthEndWeeklies(STORE.list('weekly'));
-      const rec = me.find(r => r.year === y && r.month === m);
-      if (!rec) return null;
-      const v = rec.values && rec.values.v1MonthProduced;
-      return (typeof v === 'number' && isFinite(v)) ? v : null;
-    }
     function actualSummary(py, pm, uptoWeek) {
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
       let campusActual = 0, campusSched = 0, hasData = false;
@@ -1629,7 +1627,6 @@
     }));
     const bySubj = {};
     actuals.forEach(r => { (bySubj[r.dimension] = bySubj[r.dimension] || []).push(r); });
-    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
 
     rows.forEach(r => {
       const list = (bySubj[r.name] || []).slice().sort((a, b) => (a.week - b.week));
@@ -1711,32 +1708,6 @@
   function renderTarget() {
     const state = { C: loadTargetC(1000), year: 2026, month: 7, depts: [] };
     let calc = null;
-    const num = x => (typeof x === 'number' && isFinite(x)) ? x : (parseFloat(x) || 0);
-
-    // 最佳科组已入库的 (年,月) 列表（升序）
-    function kezuMonths() {
-      const set = {};
-      STORE.list('bestkezu').forEach(r => { if (r.year && r.month) set[r.year * 12 + r.month] = { year: r.year, month: r.month }; });
-      return Object.values(set).sort((a, b) => (a.year - b.year) || (a.month - b.month));
-    }
-    // 读入指定年月的科组数据
-    function loadMonth(y, m) {
-      const recs = STORE.list('bestkezu').filter(r => r.year === y && r.month === m);
-      if (!recs.length) return null;
-      return recs.map(r => {
-        const v = r.values || {};
-        return { name: r.dimension || '未命名', s: num(v.subjects), h: num(v.hours), w: num(v.weeks) || 4 };
-      });
-    }
-    // 数据源 1v1 月生产课时（来自 DOS 周报月度周报）
-    function dataSourceProd(y, m) {
-      const me = AGG.monthEndWeeklies(STORE.list('weekly'));
-      const rec = me.find(r => r.year === y && r.month === m);
-      if (!rec) return null;
-      const v = rec.values && rec.values.v1MonthProduced;
-      return (typeof v === 'number' && isFinite(v)) ? v : null;
-    }
-
     let html = `
       <div class="panel">
         <div class="panel-title">参数设置与数据源校验</div>
