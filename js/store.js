@@ -52,6 +52,6 @@
     return n;
   }
 
-  CA.store = { readAll, upsert, list, remove, clearAll, exportJSON, importJSON, pk };
+  CA.store = { readAll, upsert, list, remove, clearAll, exportJSON, importJSON };
 
 })(window);

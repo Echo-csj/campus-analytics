@@ -478,9 +478,9 @@
   }
 
   CA.aggregate = {
-    withMonthEnd, monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
+    monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
     manualLastDay, manualMonthOf, manualMonthWeekCount, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
-    QUARTERLY_RULES, quarterlyAggregate, evalExpr, normalizeRatio,
+    QUARTERLY_RULES, quarterlyAggregate,
     YEARLY_RULES, yearlyAggregate,
   };
 

@@ -395,7 +395,5 @@
     });
   }
 
-  CA.BESTKEZU.parseMatrix = parseMatrix;
   CA.BESTKEZU.parseFile = parseFile;
-  CA.BESTKEZU.parseScoreSheets = parseScoreSheets;
 })(typeof window !== 'undefined' ? window : global);
