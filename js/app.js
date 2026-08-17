@@ -1653,7 +1653,7 @@
     let campusSched = 0, campusProd = 0;
     rows.forEach(r => { campusSched += r._sched; campusProd += r._prod; });
     const campusFinal = res.sumFinal || 0;
-    const campusPreRate = campusSched > 0 ? campusProd / campusSched : null;
+    const campusPreRate = campusFinal > 0 ? campusSched / campusFinal : null;
     const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
 
     let h = '<div class="table-wrap"><table><thead>';
@@ -1679,7 +1679,7 @@
           '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
           '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
       }
-      const preRate = r._sched > 0 ? r._prod / r._sched : null;
+      const preRate = r.final > 0 ? r._sched / r.final : null;
       const actRate = r.final > 0 ? r._prod / r.final : null;
       tr += '<td class="num">' + (r._sched > 0 ? fmt(r._sched, 1) : '<span class="muted">—</span>') + '</td>' +
         '<td class="num" style="font-weight:600">' + (r._prod > 0 ? fmt(r._prod, 1) : '<span class="muted">—</span>') + '</td>' +
@@ -2096,7 +2096,7 @@
             '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
             '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
         }
-        const preRate = subjSched > 0 ? subjProd / subjSched : null;
+        const preRate = r.final > 0 ? subjSched / r.final : null;
         const actRate = r.final > 0 ? subjProd / r.final : null;
         tr += '<td class="num">' + fmt(subjSched, 1) + '</td>' +
           '<td class="num" style="font-weight:600">' + fmt(subjProd, 1) + '</td>' +
@@ -2116,7 +2116,7 @@
           '<td class="num" style="font-weight:600">' + fmt(weekProd, 1) + '</td>' +
           '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
       }
-      const campusPreRate = campusSched > 0 ? campusProd / campusSched : null;
+      const campusPreRate = campusFinal > 0 ? campusSched / campusFinal : null;
       const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
       tfoot += '<td class="num" style="font-weight:600">' + fmt(campusSched, 1) + '</td>' +
         '<td class="num" style="font-weight:600">' + fmt(campusProd, 1) + '</td>' +
