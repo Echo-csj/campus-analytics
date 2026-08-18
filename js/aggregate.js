@@ -270,7 +270,7 @@
     { key: 'v1MonthCash', label: '1v1季度课时生产现金', src: '1v1月课时生产现金', rule: 'sum', ruleText: '当季度三个月之和' },
     { key: 'v1MonthCashAvg', label: '1v1季度课时生产现金均价', src: '1v1月课时生产现金均价', rule: 'avg', ruleText: '当季度三个月的平均值' },
     { key: 'v6MonthCash', label: '1v6季度课时生产现金', src: '1v6月课时生产现金', rule: 'sum', ruleText: '当季度三个月之和' },
-    { key: 'monthCashTotal', label: '季度课时生产总现金', src: '月课时生产总现金', rule: 'derived', expr: 'v1MonthCash + v6MonthCash', ruleText: '1v1季度课时生产现金 + 1v6季度课时生产现金' },
+    { key: 'monthCashTotal', label: '季度课时生产总现金', src: '月课时生产总现金', rule: 'sum', ruleText: '当季度各月「月课时生产总现金」之和（尊重直接录入的总额，含 1V1/1V6 之外现金；缺总额时回退 1V1+1V6）' },
     { key: 'v1MonthCashRatio', label: '1v1季度课时生产金额占比', src: '1v1月课时生产金额占比', rule: 'derived', expr: 'v1MonthCash / monthCashTotal', ruleText: '1v1季度课时生产现金 / 季度课时生产总现金' },
     { key: 'monthEff', label: '季度人均效能值', src: '月人均效能值', rule: 'avg', ruleText: '当季度三个月的平均值（各月 月课时生产总现金/校区总人数 之平均）' },
     { key: 'v1MonthUnitAvg', label: '1v1季度单位周平均', src: '1v1月单位周平均', rule: 'avg', ruleText: '当季度三个月的平均值' },
@@ -315,14 +315,26 @@
     return (typeof r === 'number' && isFinite(r)) ? r : null;
   }
 
+  // 月度「课时生产总现金」统一口径：优先用月度周报**直接录入**的「月课时生产总现金」字段
+  // （该字段可能包含 1V1 / 1V6 之外的现金，如班课等，故不能简单用 v1+v6 重算）；
+  // 仅在缺失时回退 v1MonthCash + v6MonthCash，保证鲁棒。
+  function monthCashOf(r) {
+    const v = r && r.values;
+    if (!v) return null;
+    if (v.monthCashTotal != null && isFinite(v.monthCashTotal)) return v.monthCashTotal;
+    const c = (v.v1MonthCash || 0) + (v.v6MonthCash || 0);
+    return (v.v1MonthCash != null || v.v6MonthCash != null) ? c : null;
+  }
+
   // 三个月平均：绝大多数 avg 字段直接取各月该键的值平均；
   // 月人均效能值（monthEff）非月度直接字段，按各月 (月课时生产总现金 / 校区总人数) 取平均。
+  // 注意：分子用 monthCashOf（尊重直接录入的月度总现金），与「课时生产总现金」口径一致。
   function avgMonthly(months, key) {
     const vals = months.map(r => {
       if (key === 'monthEff') {
-        const cash = (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0);
+        const cash = monthCashOf(r);
         const pop = r.values.campusTotal;
-        return (pop != null && pop !== 0) ? cash / pop : null;
+        return (cash != null && pop != null && pop !== 0) ? cash / pop : null;
       }
       return normalizeRatio(key, r.values[key]);
     }).filter(v => v != null && isFinite(v));
@@ -347,12 +359,12 @@
         if (rule.rule === 'last') {
           const last = [...g.months].reverse().find(r => r.values[rule.key] != null);
           qv[rule.key] = last ? last.values[rule.key] : null;
-        } else if (rule.rule === 'sum') {
-          const vals = g.months.map(r => r.values[rule.key]).filter(v => v != null && isFinite(v));
-          qv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
-        } else if (rule.rule === 'avg') {
-          qv[rule.key] = avgMonthly(g.months, rule.key);
-        }
+      } else if (rule.rule === 'sum') {
+        const vals = g.months.map(r => (rule.key === 'monthCashTotal' ? monthCashOf(r) : r.values[rule.key])).filter(v => v != null && isFinite(v));
+        qv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
+      } else if (rule.rule === 'avg') {
+        qv[rule.key] = avgMonthly(g.months, rule.key);
+      }
       });
       // 第二遍：派生字段（定点迭代，按依赖顺序收敛）
       let changed = true, guard = 0;
@@ -403,7 +415,7 @@
     { key: 'v1MonthCash', label: '1v1年度课时生产现金', src: '1v1月课时生产现金', rule: 'sum', ruleText: '当年各月之和' },
     { key: 'v1MonthCashAvg', label: '1v1年度课时生产现金均价', src: '1v1月课时生产现金均价', rule: 'avg', ruleText: '当年各月的平均值' },
     { key: 'v6MonthCash', label: '1v6年度课时生产现金', src: '1v6月课时生产现金', rule: 'sum', ruleText: '当年各月之和' },
-    { key: 'monthCashTotal', label: '年度课时生产总现金', src: '月课时生产总现金', rule: 'derived', expr: 'v1MonthCash + v6MonthCash', ruleText: '1v1年度课时生产现金 + 1v6年度课时生产现金' },
+    { key: 'monthCashTotal', label: '年度课时生产总现金', src: '月课时生产总现金', rule: 'sum', ruleText: '当年各月「月课时生产总现金」之和（尊重直接录入的总额，含 1V1/1V6 之外现金；缺总额时回退 1V1+1V6）' },
     { key: 'v1MonthCashRatio', label: '1v1年度课时生产金额占比', src: '1v1月课时生产金额占比', rule: 'derived', expr: 'v1MonthCash / monthCashTotal', ruleText: '1v1年度课时生产现金 / 年度课时生产总现金' },
     { key: 'monthEff', label: '年度人均效能值', src: '月人均效能值', rule: 'avg', ruleText: '当年各月的平均值（各月 月课时生产总现金/校区总人数 之平均）' },
     { key: 'v1MonthUnitAvg', label: '1v1年度单位周平均', src: '1v1月单位周平均', rule: 'avg', ruleText: '当年各月的平均值' },
@@ -448,7 +460,7 @@
         const last = [...months].reverse().find(r => r.values[rule.key] != null);
         yv[rule.key] = last ? last.values[rule.key] : null;
       } else if (rule.rule === 'sum') {
-        const vals = months.map(r => r.values[rule.key]).filter(v => v != null && isFinite(v));
+        const vals = months.map(r => (rule.key === 'monthCashTotal' ? monthCashOf(r) : r.values[rule.key])).filter(v => v != null && isFinite(v));
         yv[rule.key] = vals.length ? vals.reduce((a, b) => a + b, 0) : null;
       } else if (rule.rule === 'avg') {
         yv[rule.key] = avgMonthly(months, rule.key);

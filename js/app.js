@@ -1167,7 +1167,7 @@
       destroyChart('yrTrendChart');
       const ctx = $('#yrTrendChart'); if (ctx) {
         const labels = me.map(r => r.month + '月');
-        const cashData = me.map(r => { const c = (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0); return c || null; });
+        const cashData = me.map(r => { const v = r.values; const c = (v.monthCashTotal != null && isFinite(v.monthCashTotal)) ? v.monthCashTotal : ((v.v1MonthCash || 0) + (v.v6MonthCash || 0)); return (c != null && c !== 0) ? c : null; });
         const rateData = me.map(r => r.values.v1MonthRate != null ? r.values.v1MonthRate * 100 : null);
         // 完成率右轴自适应：避免写死 max:120 导致超额月份被天花板裁切，或完成率集中高位时折线被压扁
         const validRates = rateData.filter(x => x != null);
