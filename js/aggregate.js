@@ -1,14 +1,28 @@
 /*
  * aggregate.js — 汇聚与对比（派生，不修改原始记录）
- * 固定数据源：所有汇总指标均在此层从 store 的「月度周报」派生，UI 不散算。
- *   季度汇总 = 当季各月「月度周报」横向聚合（last / sum / avg / derived）
- *   年度汇总 = 全年各月「月度周报」横向聚合
- *   数据库视图 = 全年各月「月度周报」按标准字段逐项并排（compareYearStandard）
- * 月度周报 = 每月最后一周（weekSeq === totalWeeksOfMonth），统一口径见 monthEndWeeklies。
+ *
+ * —— 两套数据源体系（关联边界，数据流转据此分层）——
+ *   周度数据 (store stream = 'weekly')：DOS 周报各周。
+ *      关联边界：仅「周报对比」。绝不进入任何月度 / 季度 / 年度 / 满意度计算。
+ *   月度数据 (store stream = 'monthly')：每月最后一周周报。
+ *      判定口径：报表自带 weekSeq === totalWeeksOfMonth（忽略上传时间、不做任何日历日期重建）。
+ *      关联边界：季度汇总 / 年度汇总 / 五项满意度 / 数据库视图(年度各月对比) / 科组月度跟踪。
+ *      生成方式：上传月末周报时自动归类写入 monthly 流；亦可经「从周报生成月度数据」从 weekly 派生；
+ *                当 monthly 流为空时，aggregate 调用方回退到 manualMonthEndWeeklies(weekly) 派生（兼容老数据）。
+ *   固定数据源：所有月度汇总指标均从 monthly 流派生，UI 不散算。
+ *      季度汇总 = 当季各月「月度数据」横向聚合（last / sum / avg / derived）
+ *      年度汇总 = 全年各月「月度数据」横向聚合
+ *      数据库视图 = 全年各月「月度数据」按标准字段逐项并排（compareYearStandard）
  */
 (function (global) {
   'use strict';
   const CA = global.CA || (global.CA = {});
+
+  // 两套数据源体系的关联边界（供 UI 文案与自检参考）
+  const DATA_LAYERS = {
+    weekly: { stream: 'weekly', label: '周度数据', sources: ['DOS 周报（各周）'], associates: ['周报对比'] },
+    monthly: { stream: 'monthly', label: '月度数据', sources: ['每月最后一周周报'], associates: ['季度汇总', '年度汇总', '五项满意度', '数据库视图', '科组月度跟踪'] },
+  };
 
   // 标注每条周报是否为月度周报
   // 注意：克隆 values，避免下游归一化/派生改写原始 store 记录（保持派生层为纯函数）
@@ -79,15 +93,6 @@
     let nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
     return { year: nY, month: nm };
   }
-  // 由周报记录的（自然年/自然月/weekSeq）重建该周「周日（周度最后一天）」日期
-  function weekEndSunday(y, m, wk) {
-    if (!y || !m || !wk) return null;
-    const first = new Date(y, m - 1, 1);
-    const dow = first.getDay(); // 0=Sun..6=Sat
-    const monOffset = (8 - dow) % 7; // 当月第 1 周周一距 1 号的天数（Sun→1, Mon→0, …）
-    const wk1Mon = new Date(y, m - 1, 1 + monOffset);
-    return new Date(wk1Mon.getFullYear(), wk1Mon.getMonth(), wk1Mon.getDate() + (wk - 1) * 7 + 6);
-  }
   // 人工月周数：该人工月含多少个自然周（周一至周日），纯日历推导
   function manualMonthWeekCount(Y, m) {
     let pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
@@ -97,22 +102,28 @@
     const diff = Math.round((ML - MS) / 86400000);
     return (diff + 1) / 7; // diff 恒为 7 的倍数 → 整数
   }
-  // 取各区各「人工月」的月度周报（人工月最后一周），供核心看板年度/季度看板使用
+  // 由周报(weekly 流)派生「月度数据」：每月最后一周周报。
+  // 【判定口径】周次界定以**报表自带字段**为准，忽略上传时间、不做任何日历日期重建：
+  //   - 直接按每条周报声明的 (year, month) 分组（即用户认定其所属的人工月）；
+  //   - 该月「最后一周」= weekSeq === totalWeeksOfMonth（报表中周次 = 本月总周数）的那一份；
+  //   - 无显式月末标记时，取 weekSeq 最大者（无 weekSeq 时退化为顶层 week）。
+  // 此函数同时作为「月度数据(monthly 流)」的生成器与老数据回退口径，供 app.js 调用。
   function manualMonthEndWeeklies(weeklyRecs) {
     const byMM = {};
     withMonthEnd(weeklyRecs).forEach(r => {
-      const sun = weekEndSunday(r.year, r.month, r.week);
-      const mm = sun ? manualMonthOf(sun) : { year: r.year, month: r.month }; // 缺 weekSeq 退化为自然月
-      const k = mm.year + '-' + mm.month;
-      if (!byMM[k]) byMM[k] = { year: mm.year, month: mm.month, recs: [] };
-      byMM[k].recs.push({ rec: r, sun: sun ? sun.getTime() : 0, wk: r.week || 0 });
+      const k = r.year + '-' + r.month; // 报表声明的 年-月（用户认定的人工月）
+      if (!byMM[k]) byMM[k] = [];
+      byMM[k].push(r);
     });
     const result = [];
     Object.keys(byMM).forEach(k => {
-      const g = byMM[k];
-      g.recs.sort((a, b) => (b.sun - a.sun) || (b.wk - a.wk)); // 周度最后一天最晚者 = 人工月最后一周
-      const pick = g.recs[0].rec;
-      result.push(Object.assign({}, pick, { year: g.year, month: g.month, isMonthEnd: true }));
+      const arr = byMM[k];
+      let pick = arr.find(r => r.isMonthEnd); // weekSeq === totalWeeksOfMonth
+      if (!pick) {
+        const wsOf = x => (x.values && x.values.weekSeq != null ? x.values.weekSeq : (x.week || 0));
+        pick = arr.reduce((a, b) => (wsOf(b) > wsOf(a) ? b : a), arr[0]);
+      }
+      result.push(Object.assign({}, pick, { isMonthEnd: true }));
     });
     result.sort((a, b) => (a.year - b.year) || (a.month - b.month));
     // 与自然月月度周报保持同一派生口径（比例归一化 + 完成率重写）
@@ -148,8 +159,9 @@
 
   // 年度对比（标准字段模式）：只显示《季度数据统计标准》中列出的月度原数据字段，
   // 并保持与 QUARTERLY_RULES 一致的顺序，便于与季度汇总口径对齐。
-  function compareYearStandard(weeklyRecs, year) {
-    const me = monthEndWeeklies(weeklyRecs).filter(r => r.year === year);
+  // 入参 monthlyRecs = 月度数据(monthly 流)，由调用方负责提供，本函数不再做 week→month 派生。
+  function compareYearStandard(monthlyRecs, year) {
+    const me = monthlyRecs.filter(r => r.year === year);
     const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
     const recMap = {}; me.forEach(r => recMap[r.month] = r);
     const rows = QUARTERLY_RULES.map(rule => {
@@ -228,9 +240,9 @@
     });
   }
 
-  // 五项满意度：从月度周报自动提取（校区级，取「月」口径率）
-  function satisfactionFromMonthEnd(weeklyRecs) {
-    return monthEndWeeklies(weeklyRecs).map(r => {
+  // 五项满意度：从月度数据(monthly 流)提取（校区级，取「月」口径率）
+  function satisfactionFromMonthEnd(monthlyRecs) {
+    return monthlyRecs.map(r => {
       const out = { year: r.year, month: r.month };
       CA.SCHEMA.satisfactionItems.forEach(it => { out[it.key] = r.values[it.src]; });
       return out;
@@ -490,6 +502,7 @@
   }
 
   CA.aggregate = {
+    DATA_LAYERS,
     monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
     manualLastDay, manualMonthOf, manualMonthWeekCount, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate,
