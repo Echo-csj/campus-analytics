@@ -848,6 +848,10 @@
     html += '<button class="btn sm" id="cmpExportBtn">⬇ 导出 Excel</button>';
     html += '</div>';
     html += '<div id="cmpResult"></div>';
+    // —— 数据修复：用已存储的原始行(rows)重新匹配，补回因大小写/缺映射而缺失的字段 ——
+    html += '<div class="panel" style="margin-top:14px"><div class="panel-title">数据修复（字段匹配回填）</div>';
+    html += '<div class="panel-desc">若早期上传的周报因字段名大小写（如 1V1/1v1、1V6/1v6）差异，或报表使用「生产课时」等写法导致部分字段未被解析（值为空），可点下方按钮：系统用每条记录上传时保留的原始行（rows）重新匹配字段并补回缺失项，<b>无需重新上传文件</b>；已有值不会被覆盖。</div>';
+    html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="reparseBtn">⟳ 重新解析 / 回填缺失字段</button><span class="preview-note" id="reparseNote"></span></div></div>';
     // —— 月度数据（独立体系 · 手动上传）管理面板 ——
     html += '<div class="panel" style="margin-top:18px"><div class="panel-title">月度数据（独立体系 · 手动上传）</div>';
     html += '<div class="panel-desc">月度数据 = 每月「最后一周」周报，是 <b>季度汇总 / 年度汇总 / 五项满意度 / 数据库视图</b> 的唯一数据来源；与「周度数据」（全部周报，仅用于周报对比）相互独立，<b>需分别手动上传</b>。请上传当月「最后一周」周报，系统将校验其报表周次确为当月最后一周（weekSeq === 当月总周数）后再写入，避免与周度数据混淆。</div>';
@@ -882,6 +886,38 @@
     }
     yrSel.addEventListener('change', draw);
     draw();
+    // 数据修复：遍历 weekly/monthly 记录，用保留的 rows 重新匹配，补回缺失字段
+    $('#reparseBtn').addEventListener('click', () => {
+      if (!confirm('将用各记录上传时保留的原始行重新匹配字段，补回缺失项（已有值不覆盖）。是否继续？')) return;
+      const r = reparseStoredData();
+      const note = $('#reparseNote');
+      if (note) note.innerHTML = '已处理 <b>' + r.records + '</b> 条记录，补回 <b>' + r.fields + '</b> 个缺失字段（' + r.added + ' 条有更新）';
+      toast('回填完成：' + r.records + ' 条记录，补回 ' + r.fields + ' 个字段');
+      renderCmpCompare();
+    });
+  }
+
+  // 用已存储记录中的 rows 重新匹配字段，补回缺失值（不覆盖已有值）。
+  // 直接修复老构建上传、因大小写/缺映射而缺失字段的历史数据，无需重传文件。
+  function reparseStoredData() {
+    let records = 0, fields = 0, added = 0;
+    ['weekly', 'monthly'].forEach(stream => {
+      STORE.list(stream).forEach(r => {
+        if (!r.rows || !r.rows.length) return;
+        const res = CA.parser.reparseRows(r.rows);
+        const existing = r.values || {};
+        let changed = false;
+        Object.keys(res.values).forEach(k => {
+          if (existing[k] == null && res.values[k] != null) { existing[k] = res.values[k]; fields++; changed = true; }
+        });
+        if (changed) {
+          STORE.upsert(Object.assign({}, r, { values: existing }));
+          added++;
+        }
+        records++;
+      });
+    });
+    return { records: records, fields: fields, added: added };
   }
 
   // 月度数据面板：展示 monthly 流清单与计数（独立体系，与 weekly 流无关）

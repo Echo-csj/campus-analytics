@@ -62,6 +62,41 @@
     return String(s).trim().replace(/\s+/g, '').replace(/[（(].*?[)）]/g, '').replace(/(数|量|个)$/g, '').toLowerCase();
   }
 
+  // 统一的字段匹配：精确标签 → 精确别名 → 标签/别名转小写(大小写不敏感) → 清洗兜底
+  // 抽成独立函数，供 parseWeekly 与 reparseRows(回填) 复用，确保两套路径口径一致
+  function matchWeeklyLabel(lab) {
+    let f = CA.SCHEMA.weeklyLabelMap[lab];
+    if (!f) f = CA.SCHEMA.weeklyLabelMapAliases[lab];
+    if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
+    if (!f) f = CA.SCHEMA.weeklyLabelMapCI[normalizeLabel(lab)] || CA.SCHEMA.weeklyLabelMapAliases[normalizeLabel(lab)];
+    return f || null;
+  }
+
+  // 用已存储的 rows（解析时忠实保留的「标签→原始值」）重新匹配，生成 values。
+  // 用于回填老构建上传、因大小写/缺映射而缺失字段的历史记录，无需重传原文件。
+  // rows 中 ratio 字段已标准化：num = storeVal*100, isPct = true；据此还原小数。
+  function reparseRows(rows) {
+    const values = {};
+    const unmatched = [];
+    (rows || []).forEach(function (r) {
+      const f = matchWeeklyLabel(r.label);
+      if (!f) { unmatched.push(r.label); return; }
+      let storeVal;
+      if (f.type === 'text') {
+        storeVal = (r.text != null ? r.text : '');
+      } else if (f.type === 'ratio' && f.unit !== '比') {
+        const num = (r.num == null ? null : r.num);
+        if (r.isPct) storeVal = (num != null ? num / 100 : null);
+        else if (num != null && num > 1 && !f.canExceed100) storeVal = num / 100;
+        else storeVal = num;
+      } else {
+        storeVal = r.num;
+      }
+      values[f.key] = storeVal;
+    });
+    return { values: values, unmatched: unmatched };
+  }
+
   // —— 周报解析 ——
   function parseWeekly(file, ctx) {
     return new Promise((resolve, reject) => {
@@ -91,10 +126,7 @@
             const isPct = /[%％]/.test(rawStr);
             const num = toNum(val);
             // 规范字段映射：精确匹配 → 别名匹配 → 大小写不敏感 → 清洗后兜底匹配
-            let f = CA.SCHEMA.weeklyLabelMap[lab];
-            if (!f) f = CA.SCHEMA.weeklyLabelMapAliases[lab];
-            if (!f) f = CA.SCHEMA.weeklyLabelMapCI[lab.toLowerCase()];
-            if (!f) f = CA.SCHEMA.weeklyLabelMapCI[normalizeLabel(lab)] || CA.SCHEMA.weeklyLabelMapAliases[normalizeLabel(lab)];
+            let f = matchWeeklyLabel(lab);
             // 入库 values：比例类字段统一存为小数(0–1)
             let storeVal = (f && f.type === 'text') ? (val == null ? '' : String(val)) : num;
             if (f && f.type === 'ratio' && f.unit !== '比') {
@@ -209,6 +241,6 @@
     });
   }
 
-  CA.parser = { parseWeekly, parseDimension, toNum };
+  CA.parser = { parseWeekly, parseDimension, reparseRows, toNum, matchWeeklyLabel };
 
 })(window);

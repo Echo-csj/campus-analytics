@@ -37,7 +37,7 @@
     { key: 'v6WeekProduced', label: '1v6周生产课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v1WeekRate', label: '1V1周生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'v1MonthTarget', label: '1V1月目标课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v1MonthProduced', label: '1v1月生产课时', group: '课时生产', unit: '课时', type: 'num' },
+    { key: 'v1MonthProduced', label: '1v1月生产课时', group: '课时生产', unit: '课时', type: 'num', aliases: ['生产课时', '月生产课时', '月生产课时数'] },
     { key: 'v6MonthProduced', label: '1v6月生产课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v1MonthRate', label: '1V1月生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'schoolWeekAvg', label: '校周均课时', group: '课时生产', unit: '课时', type: 'num' },
@@ -155,9 +155,13 @@
   const weeklyLabelMap = {};
   weeklyFields.forEach(f => { weeklyLabelMap[f.label] = f; });
 
-  // 大小写不敏感反查表（解决 1v1 / 1V1 等写法差异导致的解析丢失）
+  // 大小写不敏感反查表（解决 1v1 / 1V1、1v6 / 1V6 及大写 V+后缀变体导致的解析丢失）
+  // 覆盖 label 与 alias（均转小写），使「1V1在读单科」「1V1在读单科数」等写法直接命中
   const weeklyLabelMapCI = {};
-  weeklyFields.forEach(f => { weeklyLabelMapCI[f.label.toLowerCase()] = f; });
+  weeklyFields.forEach(f => {
+    weeklyLabelMapCI[f.label.toLowerCase()] = f;
+    (f.aliases || []).forEach(a => { weeklyLabelMapCI[a.toLowerCase()] = f; });
+  });
 
   // 别名反查表：支持带“数/量/个”后缀、空格、1对1/一对一 等常见变体
   const weeklyLabelMapAliases = {};
