@@ -9,62 +9,53 @@
 
   // —— 周报（校区级，来自 DOS 周报·数据统计表）——
   // 该表为单列「标签→值」结构：A 列=标签，B 列=值。
-  // label 为 Excel 中的精确中文标签；key 为内部字段名。
+  // ⚠️ 提取规则（label）严格以模板《状元港教学数据汇总表·数据统计表》sheet1 第一列字段名为唯一权威依据：
+  //    - 含大写 1V1 / 1V6（与模板一致）；模板原样笔误「1V6在读学单科」亦按原样保留为规范名。
+  //    - 字段排列顺序 = 模板 A2:A91 原始自上而下顺序，确保「提取结果保持原始数据的排列顺序不变」。
+  //    - 别名（aliases）仅作历史文件兼容：保留小写 1v1/1v6、1对1/一对一 等写法，便于早期报表仍能匹配。
   const weeklyFields = [
-    // meta
     { key: 'totalWeeksOfMonth', label: '当月周数', group: '基础信息', unit: '周', type: 'num' },
     { key: 'campus', label: '校区', group: '基础信息', unit: '', type: 'text' },
     { key: 'weekSeq', label: '第几周', group: '基础信息', unit: '周', type: 'num' },
-    // 人力
     { key: 'teacherCount', label: '教师数', group: '人力', unit: '人', type: 'num' },
     { key: 'campusTotal', label: '校区总人数', group: '人力', unit: '人', type: 'num' },
-    { key: 'partTimeRatioWeek', label: '兼职授课比（周）', group: '人力', unit: '率', type: 'ratio' },
-    { key: 'partTimeRatioMonth', label: '兼职授课比（月）', group: '人力', unit: '率', type: 'ratio' },
-    { key: 'coreTeacherCount', label: '骨干教师人数', group: '人力', unit: '人', type: 'num' },
-    { key: 'coreTeacherRatio', label: '骨干教师占比', group: '人力', unit: '率', type: 'ratio' },
-    { key: 'doubleThreeCount', label: '双三老师人数', group: '人力', unit: '人', type: 'num' },
-    { key: 'doubleThreeRatio', label: '双三老师占比', group: '人力', unit: '率', type: 'ratio' },
-    // 学员
-    { key: 'v1Students', label: '1v1在读学员', group: '学员', unit: '人', type: 'num', aliases: ['1v1在读学员数', '1v1学员数', '1对1在读学员', '1对1在读学员数', '一对一在读学员', '一对一在读学员数'] },
-    { key: 'v1Subjects', label: '1v1在读单科', group: '学员', unit: '科', type: 'num', aliases: ['1v1在读单科数', '1v1单科数', '1对1在读单科', '1对1在读单科数', '一对一在读单科', '一对一在读单科数'] },
+    { key: 'v1Students', label: '1V1在读学员', group: '学员', unit: '人', type: 'num', aliases: ['1v1在读学员', '1v1在读学员数', '1v1学员数', '1对1在读学员', '1对1在读学员数', '一对一在读学员', '一对一在读学员数'] },
+    { key: 'v1Subjects', label: '1V1在读单科', group: '学员', unit: '科', type: 'num', aliases: ['1v1在读单科', '1v1在读单科数', '1v1单科数', '1对1在读单科', '1对1在读单科数', '一对一在读单科', '一对一在读单科数'] },
     { key: 'subjectRatio', label: '单科比', group: '学员', unit: '比', type: 'ratio' },
-    { key: 'v6Students', label: '1v6在读学员数', group: '学员', unit: '人', type: 'num', aliases: ['1v6在读学员', '1v6学员数', '1v6学员'] },
-    { key: 'v6Subjects', label: '1v6在读学单科', group: '学员', unit: '科', type: 'num', aliases: ['1v6在读单科', '1v6单科数', '1v6单科'] },
-    { key: 'v6SubjectRatio', label: '1v6单科比', group: '学员', unit: '比', type: 'ratio' },
-    // 课时生产
+    { key: 'v6Students', label: '1V6在读学员数', group: '学员', unit: '人', type: 'num', aliases: ['1v6在读学员数', '1v6在读学员', '1v6学员数', '1v6学员'] },
+    { key: 'v6Subjects', label: '1V6在读学单科', group: '学员', unit: '科', type: 'num', aliases: ['1v6在读学单科', '1V6在读单科', '1v6在读单科', '1v6单科数', '1v6单科'] },
+    { key: 'v6SubjectRatio', label: '1V6单科比', group: '学员', unit: '比', type: 'ratio', aliases: ['1v6单科比'] },
     { key: 'v1WeekTarget', label: '1V1周目标课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v1WeekProduced', label: '1v1周生产课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v6WeekProduced', label: '1v6周生产课时', group: '课时生产', unit: '课时', type: 'num' },
+    { key: 'v1WeekProduced', label: '1V1周生产课时', group: '课时生产', unit: '课时', type: 'num' },
+    { key: 'v6WeekProduced', label: '1V6周生产课时', group: '课时生产', unit: '课时', type: 'num' },
     { key: 'v1WeekRate', label: '1V1周生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'v1MonthTarget', label: '1V1月目标课时', group: '课时生产', unit: '课时', type: 'num' },
-    { key: 'v1MonthProduced', label: '1v1月生产课时', group: '课时生产', unit: '课时', type: 'num', aliases: ['生产课时', '月生产课时', '月生产课时数'] },
-    { key: 'v6MonthProduced', label: '1v6月生产课时', group: '课时生产', unit: '课时', type: 'num' },
+    { key: 'v1MonthProduced', label: '1V1月生产课时', group: '课时生产', unit: '课时', type: 'num', aliases: ['生产课时', '月生产课时', '月生产课时数', '1v1月生产课时'] },
+    { key: 'v6MonthProduced', label: '1V6月生产课时', group: '课时生产', unit: '课时', type: 'num', aliases: ['1v6月生产课时'] },
     { key: 'v1MonthRate', label: '1V1月生产完成率', group: '课时生产', unit: '率', type: 'ratio', canExceed100: true },
     { key: 'schoolWeekAvg', label: '校周均课时', group: '课时生产', unit: '课时', type: 'num' },
-    // 现金
-    { key: 'v1WeekCash', label: '1v1周课时生产现金', group: '现金', unit: '元', type: 'num' },
-    { key: 'v1MonthCash', label: '1v1月课时生产现金', group: '现金', unit: '元', type: 'num' },
-    { key: 'v1WeekCashAvg', label: '1v1周课时生产现金均价', group: '现金', unit: '元', type: 'num' },
-    { key: 'v1MonthCashAvg', label: '1v1月课时生产现金均价', group: '现金', unit: '元', type: 'num' },
-    { key: 'v6WeekCash', label: '1v6周课时生产现金', group: '现金', unit: '元', type: 'num' },
-    { key: 'v6MonthCash', label: '1v6月课时生产现金', group: '现金', unit: '元', type: 'num' },
+    { key: 'v1WeekCash', label: '1V1周课时生产现金', group: '现金', unit: '元', type: 'num', aliases: ['1v1周课时生产现金'] },
+    { key: 'v1MonthCash', label: '1V1月课时生产现金', group: '现金', unit: '元', type: 'num', aliases: ['1v1月课时生产现金'] },
+    { key: 'v1WeekCashAvg', label: '1V1周课时生产现金均价', group: '现金', unit: '元', type: 'num', aliases: ['1v1周课时生产现金均价'] },
+    { key: 'v1MonthCashAvg', label: '1V1月课时生产现金均价', group: '现金', unit: '元', type: 'num', aliases: ['1v1月课时生产现金均价'] },
+    { key: 'v6WeekCash', label: '1V6周课时生产现金', group: '现金', unit: '元', type: 'num', aliases: ['1v6周课时生产现金'] },
+    { key: 'v6MonthCash', label: '1V6月课时生产现金', group: '现金', unit: '元', type: 'num', aliases: ['1v6月课时生产现金'] },
     { key: 'weekCashTotal', label: '周课时生产总现金', group: '现金', unit: '元', type: 'num' },
-    { key: 'v1WeekCashRatio', label: '1v1周课时生产金额占比', group: '现金', unit: '率', type: 'ratio' },
+    { key: 'v1WeekCashRatio', label: '1V1周课时生产金额占比', group: '现金', unit: '率', type: 'ratio', aliases: ['1v1周课时生产金额占比'] },
     { key: 'monthCashTotal', label: '月课时生产总现金', group: '现金', unit: '元', type: 'num' },
-    { key: 'v1MonthCashRatio', label: '1v1月课时生产金额占比', group: '现金', unit: '率', type: 'ratio' },
-    // 效能
+    { key: 'v1MonthCashRatio', label: '1V1月课时生产金额占比', group: '现金', unit: '率', type: 'ratio', aliases: ['1v1月课时生产金额占比'] },
     { key: 'weekEff', label: '周人均效能值', group: '效能', unit: '元', type: 'num' },
     { key: 'monthEff', label: '月人均效能值', group: '效能', unit: '元', type: 'num' },
-    { key: 'v1WeekUnitAvg', label: '1v1周单位周平均', group: '效能', unit: '比', type: 'num' },
-    { key: 'v1MonthUnitAvg', label: '1v1月单位周平均', group: '效能', unit: '比', type: 'num' },
-    // 饱和度 / 协校
+    { key: 'v1WeekUnitAvg', label: '1V1周单位周平均', group: '效能', unit: '比', type: 'num', aliases: ['1v1周单位周平均'] },
+    { key: 'v1MonthUnitAvg', label: '1V1月单位周平均', group: '效能', unit: '比', type: 'num', aliases: ['1v1月单位周平均'] },
     { key: 'weekSaturation', label: '周饱和度', group: '饱和度协校', unit: '率', type: 'ratio' },
     { key: 'monthSaturation', label: '月饱和度', group: '饱和度协校', unit: '率', type: 'ratio' },
+    { key: 'partTimeRatioWeek', label: '兼职授课比（周）', group: '人力', unit: '率', type: 'ratio' },
+    { key: 'partTimeRatioMonth', label: '兼职授课比（月）', group: '人力', unit: '率', type: 'ratio' },
     { key: 'v1WeekXiexiao', label: '1V1周协校课时', group: '饱和度协校', unit: '课时', type: 'num' },
     { key: 'v1MonthXiexiao', label: '1V1月协校课时', group: '饱和度协校', unit: '课时', type: 'num' },
     { key: 'v1WeekXiexiaoRatio', label: '1V1协校占比（周）', group: '饱和度协校', unit: '率', type: 'ratio' },
     { key: 'v1MonthXiexiaoRatio', label: '1V1协校占比（月）', group: '饱和度协校', unit: '率', type: 'ratio' },
-    // 续费
     { key: 'xfWeekNum', label: '1V1周续费人数', group: '续费', unit: '人', type: 'num' },
     { key: 'xfMonthNum', label: '1V1月续费人数', group: '续费', unit: '人', type: 'num' },
     { key: 'xfWeekNumRate', label: '1V1周续费人数率', group: '续费', unit: '率', type: 'ratio' },
@@ -73,7 +64,6 @@
     { key: 'xfMonthSubj', label: '1V1月续费单科', group: '续费', unit: '科', type: 'num' },
     { key: 'xfWeekSubjRate', label: '1V1周续费单科率', group: '续费', unit: '率', type: 'ratio' },
     { key: 'xfMonthSubjRate', label: '1V1月续费单科率', group: '续费', unit: '率', type: 'ratio' },
-    // 推荐
     { key: 'tjWeekNum', label: '1V1周推荐人数', group: '推荐', unit: '人', type: 'num' },
     { key: 'tjMonthNum', label: '1V1月推荐人数', group: '推荐', unit: '人', type: 'num' },
     { key: 'tjWeekNumRate', label: '1V1周推荐人数率', group: '推荐', unit: '率', type: 'ratio' },
@@ -82,7 +72,6 @@
     { key: 'tjMonthSubj', label: '1V1月推荐单科', group: '推荐', unit: '科', type: 'num' },
     { key: 'tjWeekSubjRate', label: '1V1周推荐单科率', group: '推荐', unit: '率', type: 'ratio' },
     { key: 'tjMonthSubjRate', label: '1V1月推荐单科率', group: '推荐', unit: '率', type: 'ratio' },
-    // 结课
     { key: 'jkWeekSubj', label: '1V1周结课单科', group: '结课', unit: '科', type: 'num' },
     { key: 'jkMonthSubj', label: '1V1月结课单科', group: '结课', unit: '科', type: 'num' },
     { key: 'jkWeekSubjRate', label: '1V1周结课单科率', group: '结课', unit: '率', type: 'ratio' },
@@ -91,7 +80,6 @@
     { key: 'jkMonthNum', label: '1V1月结课人数', group: '结课', unit: '人', type: 'num' },
     { key: 'jkWeekNumRate', label: '1V1周结课人数率', group: '结课', unit: '率', type: 'ratio' },
     { key: 'jkMonthNumRate', label: '1V1月结课人数率', group: '结课', unit: '率', type: 'ratio' },
-    // 退费
     { key: 'tfWeekSubj', label: '1V1周退费单科', group: '退费', unit: '科', type: 'num' },
     { key: 'tfMonthSubj', label: '1V1月退费单科', group: '退费', unit: '科', type: 'num' },
     { key: 'tfWeekSubjRate', label: '1V1周退费单科率', group: '退费', unit: '率', type: 'ratio' },
@@ -100,7 +88,6 @@
     { key: 'tfMonthNum', label: '1V1月退费人数', group: '退费', unit: '人', type: 'num' },
     { key: 'tfWeekNumRate', label: '1V1周退费人数率', group: '退费', unit: '率', type: 'ratio' },
     { key: 'tfMonthNumRate', label: '1V1月退费人数率', group: '退费', unit: '率', type: 'ratio' },
-    // 停课 / 请假 / 入职离职
     { key: 'tkNum', label: '1V1停课人数', group: '停课请假入职', unit: '人', type: 'num' },
     { key: 'tkNumRate', label: '1V1停课人数率', group: '停课请假入职', unit: '率', type: 'ratio' },
     { key: 'addClass', label: '1V1加课', group: '停课请假入职', unit: '次', type: 'num' },
@@ -113,6 +100,10 @@
     { key: 'quitMonth', label: '月离职人数', group: '停课请假入职', unit: '人', type: 'num' },
     { key: 'quitWeekRate', label: '周离职人数率', group: '停课请假入职', unit: '率', type: 'ratio' },
     { key: 'quitMonthRate', label: '月离职人数率', group: '停课请假入职', unit: '率', type: 'ratio' },
+    { key: 'coreTeacherCount', label: '骨干教师人数', group: '人力', unit: '人', type: 'num' },
+    { key: 'coreTeacherRatio', label: '骨干教师占比', group: '人力', unit: '率', type: 'ratio' },
+    { key: 'doubleThreeCount', label: '双三老师人数', group: '人力', unit: '人', type: 'num' },
+    { key: 'doubleThreeRatio', label: '双三老师占比', group: '人力', unit: '率', type: 'ratio' },
   ];
 
   // 五项满意度（从月度周报自动提取，校区级，取「月」口径率）

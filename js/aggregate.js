@@ -157,25 +157,24 @@
     return rec;
   }
 
-  // 年度对比（标准字段模式）：只显示《季度数据统计标准》中列出的月度原数据字段，
-  // 并保持与 QUARTERLY_RULES 一致的顺序，便于与季度汇总口径对齐。
+  // 年度对比（标准字段模式）：以模板《数据统计表》sheet1 第一列字段顺序（SCHEMA.weeklyFields）原样展示
+  // 各月「月度周报」的月度原数据字段，保持与数据源报表一致的排列顺序；某月未出现的项留空。
   // 入参 monthlyRecs = 月度数据(monthly 流)，由调用方负责提供，本函数不再做 week→month 派生。
   function compareYearStandard(monthlyRecs, year) {
     const me = monthlyRecs.filter(r => r.year === year);
     const columns = me.map(r => ({ key: r.month, label: r.month + '月' }));
     const recMap = {}; me.forEach(r => recMap[r.month] = r);
-    const rows = QUARTERLY_RULES.map(rule => {
-      const f = CA.SCHEMA.weeklyFields.find(x => x.key === rule.key);
+    const rows = CA.SCHEMA.weeklyFields.map(f => {
       const cells = columns.map(c => {
         const rec = recMap[c.key];
         if (!rec) return null;
         // 各字段统一取自月度周报（rec.values）。v1MonthRate 已在 monthEndWeeklies 统一
         // 派生为 生产课时/目标课时，与季度/年度聚合一致；原表列脏值被覆盖，无需特判。
-        const rawVal = rec.values[rule.key];
+        const rawVal = rec.values[f.key];
         if (rawVal == null) return null;
-        const val = normalizeRatio(rule.key, rawVal);
-        const isRatio = f && f.type === 'ratio';
-        const isBi = f && f.unit === '比';
+        const val = normalizeRatio(f.key, rawVal);
+        const isRatio = f.type === 'ratio';
+        const isBi = f.unit === '比';
         let num, text;
         if (isRatio) {
           num = isBi ? val : val * 100;
@@ -186,7 +185,7 @@
         }
         return { num: num, text: text, isPct: isRatio && !isBi };
       });
-      return { key: rule.key, label: rule.src, isPct: f && f.type === 'ratio' && f.unit !== '比', values: cells };
+      return { key: f.key, label: f.label, isPct: f.type === 'ratio' && f.unit !== '比', values: cells };
     }).filter(r => r.values.some(c => c != null));
     return { columns, rows };
   }

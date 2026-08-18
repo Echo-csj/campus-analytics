@@ -1074,7 +1074,7 @@
       html += '</tr>';
     });
     html += '</tbody></table></div>';
-    html += '<div class="preview-note">说明：年度各月对比按各月「月度周报」展示《季度数据统计标准》列出的月度字段，并保持与该标准一致的顺序。某月未出现的项留空。</div>';
+    html += '<div class="preview-note">说明：年度各月对比按模板《数据统计表》sheet1 第一列字段顺序，原样展示各月「月度周报」的月度原数据字段，保持与数据源报表一致的排列顺序；某月未出现的项留空。</div>';
     $('#cmpResult').innerHTML = html;
     const sel = $('#cmpMetric');
     function drawChart() {
