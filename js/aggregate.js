@@ -7,8 +7,8 @@
  *   月度数据 (store stream = 'monthly')：每月最后一周周报。
  *      判定口径：报表自带 weekSeq === totalWeeksOfMonth（忽略上传时间、不做任何日历日期重建）。
  *      关联边界：季度汇总 / 年度汇总 / 五项满意度 / 数据库视图(年度各月对比) / 科组月度跟踪。
- *      生成方式：上传月末周报时自动归类写入 monthly 流；亦可经「从周报生成月度数据」从 weekly 派生；
- *                当 monthly 流为空时，aggregate 调用方回退到 manualMonthEndWeeklies(weekly) 派生（兼容老数据）。
+ *      生成方式：仅通过「数据源 → 月度数据」面板的手动上传入口写入 monthly 流（上传时校验 weekSeq===totalWeeksOfMonth）。
+ *                不与周度数据自动同步，二者独立维护，避免「自动 + 手动」混合导致的数据混乱。
  *   固定数据源：所有月度汇总指标均从 monthly 流派生，UI 不散算。
  *      季度汇总 = 当季各月「月度数据」横向聚合（last / sum / avg / derived）
  *      年度汇总 = 全年各月「月度数据」横向聚合
@@ -107,7 +107,7 @@
   //   - 直接按每条周报声明的 (year, month) 分组（即用户认定其所属的人工月）；
   //   - 该月「最后一周」= weekSeq === totalWeeksOfMonth（报表中周次 = 本月总周数）的那一份；
   //   - 无显式月末标记时，取 weekSeq 最大者（无 weekSeq 时退化为顶层 week）。
-  // 此函数同时作为「月度数据(monthly 流)」的生成器与老数据回退口径，供 app.js 调用。
+  // 此函数为纯派生工具，当前 app.js 运行时不再自动调用（月度数据已改为手动上传），保留为导出能力以备查验 / 迁移。
   function manualMonthEndWeeklies(weeklyRecs) {
     const byMM = {};
     withMonthEnd(weeklyRecs).forEach(r => {

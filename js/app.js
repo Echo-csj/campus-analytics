@@ -691,7 +691,7 @@
     let html = '<div class="row" style="margin-bottom:12px"><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div>';
     html += '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」（月度数据体系）的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
-    if (!data.length) html += '<div class="empty">尚无月度周报数据。请先上传各月最后一周的 DOS 周报。</div>';
+    if (!data.length) html += '<div class="empty">尚无月度周报数据。请先在「数据源」页手动上传各月最后一周的月度周报。</div>';
     else {
       html += '<div class="chart-box"><canvas id="satChart"></canvas></div>';
       html += '<div class="section-h">月度明细</div><div class="table-wrap"><table><thead><tr><th>年</th><th>月</th>';
@@ -726,7 +726,7 @@
           <div class="uc-ico">${uploadIco}</div>
           <div>
             <div class="uc-title">历史周报批量入库</div>
-            <div class="uc-sub">一次性选入多份 DOS 周报（含各月「月度周报」），自动按文件名/内容判定年·月·周并入库，立即刷新下方对比。月度对比需同月多周；季度/年度对比需各月月度周报。</div>
+            <div class="uc-sub">上传 DOS 周报（各周），自动按文件名/内容判定年·月·周并写入<b>周度数据</b>。本入口<b>仅维护周度数据</b>（用于「周报对比」），<b>不会</b>自动生成月度数据；月度数据请在上方「月度数据」面板单独手动上传，两者相互独立、互不干扰。</div>
           </div>
         </div>
         <div class="uc-files" id="cmpFileList"></div>
@@ -815,15 +815,14 @@
     commitBtn.addEventListener('click', () => {
       const ok = pending.filter(r => r.ok);
       if (!ok.length) return;
-      let n = 0, mn = 0;
+      let n = 0;
       ok.forEach(r => {
         const p = r.res.period, v = r.res.values;
+        // 仅写入周度数据(weekly 流)。月度数据由独立的「月度数据」上传入口单独手动上传，二者互不干扰。
         STORE.upsert({ stream: 'weekly', year: p.year, month: p.month, week: p.week, campus: v.campus || '泉山', values: v, rows: r.res.rows, importedAt: Date.now() });
         n++;
-        // 月度数据：若为月度周报（weekSeq===totalWeeksOfMonth），同步写入独立的 monthly 流
-        if (r.res.detected && r.res.detected.isMonthEnd) { materializeMonthly(p, v, r.res.rows); mn++; }
       });
-      toast('已入库 ' + n + ' 份历史周报' + (mn ? '，其中 ' + mn + ' 份已归为月度数据' : ''));
+      toast('已入库 ' + n + ' 份周报（仅写入周度数据）');
       updateCount();
       tabs[currentTab].render();
     });
@@ -849,13 +848,17 @@
     html += '<button class="btn sm" id="cmpExportBtn">⬇ 导出 Excel</button>';
     html += '</div>';
     html += '<div id="cmpResult"></div>';
-    // —— 月度数据（独立体系）管理面板 ——
-    html += '<div class="panel" style="margin-top:18px"><div class="panel-title">月度数据（独立体系）</div>';
-    html += '<div class="panel-desc">月度数据 = 每月「最后一周」周报，是 <b>季度汇总 / 年度汇总 / 五项满意度 / 数据库视图</b> 的唯一数据来源；与「周度数据」（全部周报，仅用于周报对比）相互独立。可由周报自动归类生成，也可在此单独管理。</div>';
+    // —— 月度数据（独立体系 · 手动上传）管理面板 ——
+    html += '<div class="panel" style="margin-top:18px"><div class="panel-title">月度数据（独立体系 · 手动上传）</div>';
+    html += '<div class="panel-desc">月度数据 = 每月「最后一周」周报，是 <b>季度汇总 / 年度汇总 / 五项满意度 / 数据库视图</b> 的唯一数据来源；与「周度数据」（全部周报，仅用于周报对比）相互独立，<b>需分别手动上传</b>。请上传当月「最后一周」周报，系统将校验其报表周次确为当月最后一周（weekSeq === 当月总周数）后再写入，避免与周度数据混淆。</div>';
     html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap">';
-    html += '<button class="btn" id="genMonthlyBtn">⟳ 从周报生成 / 刷新月度数据</button>';
+    html += '<label class="btn primary">选择月度周报文件（可多选）<input type="file" id="monthlyFiles" accept=".xlsx,.xls" multiple hidden/></label>';
+    html += '<button class="btn" id="monthlyParse">解析所选</button>';
+    html += '<button class="btn primary" id="monthlyCommit" disabled>确认上传月度数据</button>';
     html += '<button class="btn ghost" id="clearMonthlyBtn">清空月度数据</button>';
     html += '<span class="preview-note" id="monthlyCount"></span></div>';
+    html += '<div class="uc-files" id="monthlyFileList"></div>';
+    html += '<div class="uc-log" id="monthlyUploadLog">尚未选择文件。选好后点「解析所选」预览，系统会校验是否为当月最后一周周报。</div>';
     html += '<div id="monthlyList" style="margin-top:10px"></div></div>';
     html += compareUploadPanelHTML();
     $('#cmpBody').innerHTML = html;
@@ -864,16 +867,16 @@
 
     const yrSel = $('#cmpYear');
     $('#cmpExportBtn').addEventListener('click', () => { const y = parseInt(yrSel.value, 10); exportDataSource(monthly, y); });
-    $('#genMonthlyBtn').addEventListener('click', generateMonthlyFromWeekly);
     $('#clearMonthlyBtn').addEventListener('click', () => {
-      if (!confirm('确认清空全部月度数据？此操作仅删除月度数据，不影响周报数据。')) return;
+      if (!confirm('确认清空全部月度数据？此操作仅删除月度数据，不影响周报（周度）数据。')) return;
       STORE.list('monthly').forEach(r => STORE.remove('monthly', r.year, r.month, r.week, r.dimension));
       toast('已清空月度数据');
       renderCmpCompare();
     });
+    wireMonthlyUpload();
     function draw() {
       const y = parseInt(yrSel.value, 10);
-      if (!years.length) { $('#cmpResult').innerHTML = '<div class="empty">暂无数据。请先用下方「历史周报批量入库」上传各月月度周报，或点击「从周报生成 / 刷新月度数据」。</div>'; destroyChart('cmpChart'); return; }
+      if (!years.length) { $('#cmpResult').innerHTML = '<div class="empty">暂无数据。请先在上方「月度数据」面板手动上传各月最后一周周报（系统会校验周次）。</div>'; destroyChart('cmpChart'); return; }
       const cmp = AGG.compareYearStandard(monthly, y);
       renderCompareTable(cmp);
     }
@@ -885,15 +888,93 @@
   function renderMonthlyPanel() {
     const list = STORE.list('monthly');
     const cnt = $('#monthlyCount');
-    if (cnt) cnt.innerHTML = '当前月度数据：<b>' + list.length + '</b> 条' + (list.length ? '（年份：' + [...new Set(list.map(r => r.year))].sort((a, b) => a - b).join('、') + '）' : '（周报尚未归类，点上方按钮生成）');
+    if (cnt) cnt.innerHTML = '当前月度数据：<b>' + list.length + '</b> 条' + (list.length ? '（年份：' + [...new Set(list.map(r => r.year))].sort((a, b) => a - b).join('、') + '）' : '（请使用上方「选择月度周报文件」手动上传）');
     const box = $('#monthlyList');
     if (!box) return;
-    if (!list.length) { box.innerHTML = '<div class="preview-note">尚无月度数据。上传各月最后一周周报后将自动归类，或点击「从周报生成 / 刷新月度数据」。</div>'; return; }
+    if (!list.length) { box.innerHTML = '<div class="preview-note">尚无月度数据。请在上方「选择月度周报文件」上传各月最后一周周报（系统会自动校验周次后写入，不会与周度数据混淆）。</div>'; return; }
     const rows = list.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month)).map(r => {
       const c = r.values && (r.values.monthCashTotal != null ? r.values.monthCashTotal : (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0));
       return '<tr><td>' + r.year + '年' + r.month + '月</td><td>' + (r.campus || '') + '</td><td class="num">' + (c != null ? fmt(c) : '—') + '</td><td>' + (r.sourceWeek != null ? '第' + r.sourceWeek + '周' : '—') + '</td></tr>';
     }).join('');
     box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>年月</th><th>校区</th><th class="num">月课时生产总现金</th><th>来源周</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
+  }
+
+  // 月度数据手动上传：仅写入 monthly 流，且校验确为当月最后一周周报（weekSeq === totalWeeksOfMonth）。
+  // 与周度上传(wireCompareUpload)相互独立，互不写入对方流，避免「自动 + 手动」混合导致的数据混乱。
+  function wireMonthlyUpload() {
+    const fileInput = $('#monthlyFiles');
+    const listEl = $('#monthlyFileList');
+    const logEl = $('#monthlyUploadLog');
+    const commitBtn = $('#monthlyCommit');
+    const parseBtn = $('#monthlyParse');
+    let files = [], pending = [];
+    if (!fileInput) return;
+
+    fileInput.addEventListener('change', e => {
+      files = [...(e.target.files || [])];
+      if (!files.length) { listEl.innerHTML = ''; commitBtn.disabled = true; logEl.textContent = '尚未选择文件。'; pending = []; return; }
+      listEl.innerHTML = files.map(f => '<div class="uc-file">📄 ' + f.name + '</div>').join('');
+      commitBtn.disabled = true; pending = [];
+      logEl.textContent = '已选 ' + files.length + ' 份，点「解析所选」预览（系统将校验月度周报）。';
+    });
+
+    parseBtn.addEventListener('click', () => {
+      if (!files.length) { toast('请先选择文件'); return; }
+      const p = inferPeriod();
+      logEl.textContent = '解析中…';
+      Promise.all(files.map(f => parseCmpFile(f, p.year, p.month, p.week)
+        .then(res => ({ file: f, res, ok: true }))
+        .catch(err => ({ file: f, err: err.message, ok: false }))))
+        .then(results => {
+          pending = results;
+          renderMonthlyParseLog(results);
+          const valid = results.filter(r => r.ok && r.res.detected && r.res.detected.isMonthEnd);
+          commitBtn.disabled = valid.length === 0;
+        });
+    });
+
+    commitBtn.addEventListener('click', () => {
+      const valid = pending.filter(r => r.ok && r.res.detected && r.res.detected.isMonthEnd);
+      if (!valid.length) return;
+      let n = 0;
+      valid.forEach(r => {
+        const p0 = r.res.period, v = r.res.values;
+        materializeMonthly(p0, v, r.res.rows); // 仅写入 monthly 流，与 weekly 流互不干扰
+        n++;
+      });
+      toast('已上传 ' + n + ' 条月度数据（独立写入月度体系）');
+      if (typeof renderCmpCompare === 'function') renderCmpCompare();
+    });
+  }
+
+  // 月度上传解析日志 + 校验结果：仅 weekSeq === totalWeeksOfMonth 的报表可上传为月度数据
+  function renderMonthlyParseLog(results) {
+    const ok = results.filter(r => r.ok);
+    const fail = results.filter(r => !r.ok);
+    const me = ok.filter(r => r.res.detected && r.res.detected.isMonthEnd);
+    let html = '解析完成：<b>' + ok.length + '</b> 份可解析，<b>' + fail.length + '</b> 份失败；其中<b>月度周报（最后一周）：' + me.length + ' 份</b>可上传。<br/>';
+    html += '<table><thead><tr><th>文件</th><th>判定周期</th><th>报表周次</th><th>校验结果</th><th>提示</th></tr></thead><tbody>';
+    results.forEach(r => {
+      if (r.ok) {
+        const p = r.res.period, d = r.res.detected || {};
+        const isME = !!(d.isMonthEnd);
+        const tip = [];
+        if (!r.res.values.campus) tip.push('未识别校区');
+        if (r.res.unmatched && r.res.unmatched.length) {
+          const show = r.res.unmatched.slice(0, 5).map(u => '「' + u + '」').join('、');
+          const more = r.res.unmatched.length > 5 ? ' 等' + r.res.unmatched.length + '项' : '';
+          tip.push('<span class="warn">未匹配 ' + show + more + '</span>');
+        }
+        const check = isME ? '<span class="ok">✓ 月度周报</span>' : '<span class="warn">✗ 非最后一周，不可上传</span>';
+        const wkInfo = (d.weekSeq != null ? d.weekSeq : '?') + ' / ' + (d.totalWeeks != null ? d.totalWeeks : '?');
+        html += '<tr><td>' + r.file.name + '</td><td class="num">' + p.year + '/' + p.month + ' 第' + p.week + '周</td>' +
+          '<td class="num">' + wkInfo + '</td><td>' + check + '</td><td>' + (tip.join('；') || '正常') + '</td></tr>';
+      } else {
+        html += '<tr><td>' + r.file.name + '</td><td colspan="4" class="warn">解析失败：' + (r.err || '未知错误') + '</td></tr>';
+      }
+    });
+    html += '</tbody></table>';
+    $('#monthlyUploadLog').innerHTML = html;
   }
 
   // 单元格显示：缺失（null）留空；百分比保留原表「%」文本；数值千分位
@@ -995,14 +1076,13 @@
     return (typeof v === 'number' && isFinite(v)) ? v : null;
   }
 
-  // —— 两套数据源体系：月度数据(monthly 流) 的获取与生成 ——
+  // —— 两套数据源体系：月度数据(monthly 流) 的获取 ——
   // 月度数据 = 每月最后一周周报，是 季度/年度/满意度/数据库视图/科组月度跟踪 的唯一来源。
   // 周度数据(weekly 流) 仅用于「周报对比」，与此体系相互独立、互不干扰。
+  // 月度数据仅来自独立的 monthly 流（由「月度数据」面板手动上传，见 wireMonthlyUpload），
+  // 不再从 weekly 流自动派生，避免「自动 + 手动」混合导致的数据混乱。
   function getMonthlyRecords() {
-    const monthly = STORE.list('monthly');
-    if (monthly.length) return monthly;
-    // 兼容回退：老用户仅有周报数据时，按报表周次派生月度数据（与"生成月度数据"按钮同源）
-    return AGG.manualMonthEndWeeklies(STORE.list('weekly'));
+    return STORE.list('monthly');
   }
   // 将一条「月末周报」写入独立的 monthly 流（year-month 为主键，与 weekly 流互不干扰）
   function materializeMonthly(p, v, rows, srcWeek) {
@@ -1012,14 +1092,6 @@
       values: v, rows: rows, importedAt: Date.now(),
       sourceWeek: srcWeek != null ? srcWeek : p.week,
     });
-  }
-  // 从 weekly 流按报表周次重新生成 / 刷新 monthly 流（覆盖式）
-  function generateMonthlyFromWeekly() {
-    const me = AGG.manualMonthEndWeeklies(STORE.list('weekly'));
-    let n = 0;
-    me.forEach(r => { materializeMonthly({ year: r.year, month: r.month }, r.values, r.rows, r.week); n++; });
-    toast('已生成 / 刷新 ' + n + ' 条月度数据（来自周报月末周）');
-    if (typeof renderCmpCompare === 'function') renderCmpCompare();
   }
 
   function renderKezuTargetDash() {
@@ -1181,7 +1253,7 @@
     const recs = STORE.list('weekly');
     const monthly = getMonthlyRecords();
     const years = AGG.yearOptions(monthly);
-    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库各月月度周报。</div>'; return; }
+    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」页手动上传各月最后一周的月度周报。</div>'; return; }
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
@@ -1260,7 +1332,7 @@
     const recs = STORE.list('weekly');
     const monthly = getMonthlyRecords();
     const years = AGG.yearOptions(monthly);
-    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库各月月度周报。</div>'; return; }
+    if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」页手动上传各月最后一周的月度周报。</div>'; return; }
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashQYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
