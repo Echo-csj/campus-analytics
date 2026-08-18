@@ -851,7 +851,8 @@
     // —— 数据修复：用已存储的原始行(rows)重新匹配，补回因大小写/缺映射而缺失的字段 ——
     html += '<div class="panel" style="margin-top:14px"><div class="panel-title">数据修复（字段匹配回填）</div>';
     html += '<div class="panel-desc">若早期上传的周报因字段名大小写（如 1V1/1v1、1V6/1v6）差异，或报表使用「生产课时」等写法导致部分字段未被解析（值为空），可点下方按钮：系统用每条记录上传时保留的原始行（rows）重新匹配字段并补回缺失项，<b>无需重新上传文件</b>；已有值不会被覆盖。</div>';
-    html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="reparseBtn">⟳ 重新解析 / 回填缺失字段</button><span class="preview-note" id="reparseNote"></span></div></div>';
+    html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="reparseBtn">⟳ 重新解析 / 回填缺失字段</button><button class="btn ghost" id="reparseForceBtn">强制重解析（覆盖已有值）</button><span class="preview-note" id="reparseNote"></span></div>';
+    html += '<div id="reparseDetail" class="uc-log" style="margin-top:8px;display:none"></div></div>';
     // —— 月度数据（独立体系 · 手动上传）管理面板 ——
     html += '<div class="panel" style="margin-top:18px"><div class="panel-title">月度数据（独立体系 · 手动上传）</div>';
     html += '<div class="panel-desc">月度数据 = 每月「最后一周」周报，是 <b>季度汇总 / 年度汇总 / 五项满意度 / 数据库视图</b> 的唯一数据来源；与「周度数据」（全部周报，仅用于周报对比）相互独立，<b>需分别手动上传</b>。请上传当月「最后一周」周报，系统将校验其报表周次确为当月最后一周（weekSeq === 当月总周数）后再写入，避免与周度数据混淆。</div>';
@@ -887,37 +888,64 @@
     yrSel.addEventListener('change', draw);
     draw();
     // 数据修复：遍历 weekly/monthly 记录，用保留的 rows 重新匹配，补回缺失字段
-    $('#reparseBtn').addEventListener('click', () => {
-      if (!confirm('将用各记录上传时保留的原始行重新匹配字段，补回缺失项（已有值不覆盖）。是否继续？')) return;
-      const r = reparseStoredData();
+    function doReparse(overwrite) {
+      const r = reparseStoredData(overwrite);
       const note = $('#reparseNote');
-      if (note) note.innerHTML = '已处理 <b>' + r.records + '</b> 条记录，补回 <b>' + r.fields + '</b> 个缺失字段（' + r.added + ' 条有更新）';
+      if (note) note.innerHTML = '已处理 <b>' + r.records + '</b> 条记录，补回 <b>' + r.fields + '</b> 个字段（' + r.added + ' 条有更新）' +
+        (r.noRows ? '；<span class="warn-cell">' + r.noRows + ' 条<b>无原始行</b>，无法回填（需重传文件）</span>' : '') +
+        (r.withUnmatched ? '；<span class="warn-cell">' + r.withUnmatched + ' 条有<b>未匹配表头</b>（见下方明细）</span>' : '');
+      // 诊断明细：列出有未匹配表头 / 无原始行的记录，便于定位缺映射 vs 缺原始行
+      const box = $('#reparseDetail');
+      if (box) {
+        const bad = r.details.filter(d => !d.hasRows || d.unmatched.length);
+        if (bad.length) {
+          box.style.display = 'block';
+          box.innerHTML = '<b>诊断明细（需关注 ' + bad.length + ' 条）</b><br>' + bad.map(d => {
+            const tag = d.y + '年' + d.m + '月 第' + (d.w || 0) + '周 [' + d.stream + ']';
+            if (!d.hasRows) return '• ' + tag + '：<span class="warn-cell">无原始行 rows，无法回填，需重传该文件</span>';
+            return '• ' + tag + '：未匹配表头 → <code>' + d.unmatched.join('、') + '</code>';
+          }).join('<br>');
+        } else if (box) { box.style.display = 'none'; box.innerHTML = ''; }
+      }
       toast('回填完成：' + r.records + ' 条记录，补回 ' + r.fields + ' 个字段');
       renderCmpCompare();
+    }
+    $('#reparseBtn').addEventListener('click', () => {
+      if (!confirm('将用各记录上传时保留的原始行重新匹配字段，补回缺失项（已有值不覆盖）。是否继续？')) return;
+      doReparse(false);
+    });
+    $('#reparseForceBtn').addEventListener('click', () => {
+      if (!confirm('将用原始行<b>重新解析并覆盖</b>所有字段（含已有值），用于旧数据解析存在偏差的情况。是否继续？')) return;
+      doReparse(true);
     });
   }
 
-  // 用已存储记录中的 rows 重新匹配字段，补回缺失值（不覆盖已有值）。
+  // 用已存储记录中的 rows 重新匹配字段，补回缺失值。
+  // overwrite=true 时覆盖已有值（用于旧数据解析存在偏差的整体重解析）；否则只补缺失(null)项。
   // 直接修复老构建上传、因大小写/缺映射而缺失字段的历史数据，无需重传文件。
-  function reparseStoredData() {
-    let records = 0, fields = 0, added = 0;
+  // 返回明细：每条记录是否保留原始行、哪些原始表头未匹配（用于区分「缺映射」vs「缺原始行」）。
+  function reparseStoredData(overwrite) {
+    let records = 0, fields = 0, added = 0, noRows = 0, withUnmatched = 0;
+    const details = [];
     ['weekly', 'monthly'].forEach(stream => {
       STORE.list(stream).forEach(r => {
-        if (!r.rows || !r.rows.length) return;
+        records++;
+        if (!r.rows || !r.rows.length) { noRows++; details.push({ y: r.year, m: r.month, w: r.week, stream, hasRows: false, unmatched: [] }); return; }
         const res = CA.parser.reparseRows(r.rows);
         const existing = r.values || {};
         let changed = false;
         Object.keys(res.values).forEach(k => {
-          if (existing[k] == null && res.values[k] != null) { existing[k] = res.values[k]; fields++; changed = true; }
+          if (overwrite || existing[k] == null) {
+            if (existing[k] !== res.values[k]) { existing[k] = res.values[k]; fields++; changed = true; }
+          }
         });
-        if (changed) {
-          STORE.upsert(Object.assign({}, r, { values: existing }));
-          added++;
-        }
-        records++;
+        if (changed) { STORE.upsert(Object.assign({}, r, { values: existing })); added++; }
+        const um = (res.unmatched || []).filter(Boolean);
+        if (um.length) withUnmatched++;
+        details.push({ y: r.year, m: r.month, w: r.week, stream, hasRows: true, unmatched: um });
       });
     });
-    return { records: records, fields: fields, added: added };
+    return { records, fields, added, noRows, withUnmatched, details };
   }
 
   // 月度数据面板：展示 monthly 流清单与计数（独立体系，与 weekly 流无关）
@@ -930,7 +958,16 @@
     if (!list.length) { box.innerHTML = '<div class="preview-note">尚无月度数据。请在上方「选择月度周报文件」上传各月最后一周周报（系统会自动校验周次后写入，不会与周度数据混淆）。</div>'; return; }
     const rows = list.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month)).map(r => {
       const c = r.values && (r.values.monthCashTotal != null ? r.values.monthCashTotal : (r.values.v1MonthCash || 0) + (r.values.v6MonthCash || 0));
-      return '<tr><td>' + r.year + '年' + r.month + '月</td><td>' + (r.campus || '') + '</td><td class="num">' + (c != null ? fmt(c) : '—') + '</td><td>' + (r.sourceWeek != null ? '第' + r.sourceWeek + '周' : '—') + '</td></tr>';
+      // 每条记录自查：原始行是否保留 + 哪些表头未匹配（区分「缺映射」vs「缺原始行」）
+      let diag = '';
+      if (!r.rows || !r.rows.length) {
+        diag = '<span class="warn-cell">无原始行（早期版本上传，无法回填，需重传）</span>';
+      } else {
+        const um = r.rows.map(x => x.label).filter(lab => !CA.parser.matchWeeklyLabel(lab));
+        if (um.length) diag = '<span class="warn-cell">未匹配表头：' + um.join('、') + '</span>';
+      }
+      const diagHtml = diag ? '<tr class="diag-row"><td colspan="4" style="font-size:12px;color:#71717a;border-top:1px dashed #e4e4e7">' + diag + '</td></tr>' : '';
+      return '<tr><td>' + r.year + '年' + r.month + '月</td><td>' + (r.campus || '') + '</td><td class="num">' + (c != null ? fmt(c) : '—') + '</td><td>' + (r.sourceWeek != null ? '第' + r.sourceWeek + '周' : '—') + '</td></tr>' + diagHtml;
     }).join('');
     box.innerHTML = '<div class="table-wrap"><table><thead><tr><th>年月</th><th>校区</th><th class="num">月课时生产总现金</th><th>来源周</th></tr></thead><tbody>' + rows + '</tbody></table></div>';
   }
