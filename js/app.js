@@ -572,100 +572,39 @@
 
   // 最佳科组 · 月度数据 vs 季度汇总 横向对比
   // 支持按「月份」或「季度」筛选；月度明细与季度汇总并排对照，并附趋势图（按对比维度）。
-  function kezuCompareHTML(records, mode, sel) {
-    // records: 某年全部科组×月 flat 记录
-    const selNum = +sel;
-    const subjects = [...new Set(records.map(r => r.subject))];
-    const qOf = m => (m ? Math.floor((m - 1) / 3) + 1 : null);
-    let monthList, quarter;
-    if (mode === 'month') {
-      monthList = [selNum];
-      quarter = qOf(selNum);
-    } else {
-      quarter = selNum;
-      monthList = [3 * quarter - 2, 3 * quarter - 1, 3 * quarter];
-    }
-    const monthRecs = records.filter(r => monthList.includes(r.month));
-    const qAgg = kezuQuarter(records).filter(q => q.quarter === quarter);
-    // 行 = 科组；聚合各月明细与季度汇总
-    const RATE_KEYS = ['xufeiRate', 'jiekeRate', 'tuifeiRate', 'tingkeRate', 'quitRate'];
-    const NUM_KEYS = ['hours', 'subjects', 'weeks', 'weekAvg'];
-    const cell = (r, k) => {
-      if (!r) return { t: '—', cls: 'muted' };
-      if (RATE_KEYS.includes(k)) return { t: pct(r[k]), cls: '' };
-      return { t: fmt(r[k], k === 'weekAvg' ? 2 : (k === 'subjects' ? 1 : 0)), cls: '' };
-    };
-    const qMap = {}; qAgg.forEach(q => qMap[q.subject] = q);
-    const mMap = {};
-    monthRecs.forEach(r => { (mMap[r.subject] = mMap[r.subject] || {})[r.month] = r; });
+  // 横向对比：维度元数据（同项目 · 跨时间粒度）
+  const KEZU_CMP_DIMS = [
+    { k: 'hours', l: '课时', kind: 'num', d: 0 },
+    { k: 'subjects', l: '单科数', kind: 'num', d: 1 },
+    { k: 'weekAvg', l: '周平均', kind: 'num', d: 2 },
+    { k: 'xufeiRate', l: '续费率', kind: 'rate' },
+    { k: 'jiekeRate', l: '结课率', kind: 'rate' },
+    { k: 'tuifeiRate', l: '退费率', kind: 'rate' },
+    { k: 'tingkeRate', l: '停课率', kind: 'rate' },
+    { k: 'quitRate', l: '离职率', kind: 'rate' },
+  ];
+  const CMP_COLORS = ['#4F46E5', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
 
-    const qLabel = quarter ? ('Q' + quarter) : '—';
-    const periodLabel = mode === 'month'
-      ? (selNum + ' 月（' + qLabel + '）')
-      : (qLabel + '：' + monthList.join(' / ') + ' 月');
-
-    // —— 并排对照表（每科组一行：月度明细 + 季度汇总）——
-    let h = '<div class="table-wrap"><table><thead><tr>';
-    h += '<th rowspan="2">科组</th>';
-    if (mode === 'month') {
-      h += '<th class="num" colspan="5">月度明细（' + selNum + ' 月）</th>';
-    } else {
-      h += '<th class="num" colspan="' + (monthList.length * 2 + 1) + '">月度明细（' + qLabel + ' 内各月）</th>';
-    }
-    h += '<th class="num" colspan="5">季度汇总（' + qLabel + '）</th>';
-    h += '<th class="num" rowspan="2">月度课时<br>占季度比</th></tr><tr>';
-    if (mode === 'month') {
-      ['课时', '单科数', '周平均', '续费率', '结课率'].forEach(l => h += '<th class="num">' + l + '</th>');
-    } else {
-      monthList.forEach(m => { h += '<th class="num">' + m + '月课时</th><th class="num">' + m + '月续费</th>'; });
-      h += '<th class="num">月度均课时</th>';
-    }
-    ['季度课时', '均单科数', '季度周平均', '续费率', '结课率'].forEach(l => h += '<th class="num">' + l + '</th>');
-    h += '</tr></thead><tbody>';
-    if (!subjects.length) {
-      h += '<tr><td colspan="20" class="empty">该年暂无科组数据</td></tr>';
-    } else {
-      subjects.forEach(subj => {
-        const mRecs = monthList.map(m => (mMap[subj] || {})[m]).filter(Boolean);
-        const q = qMap[subj];
-        const mHours = mRecs.reduce((a, r) => a + (r.hours || 0), 0);
-        const mXf = mRecs.reduce((a, r) => a + (r.xufeiRate != null && r.subjects ? r.xufeiRate : 0), 0); // 仅占位
-        const mJk = mRecs.reduce((a, r) => a + (r.jiekeRate != null && r.subjects ? r.jiekeRate : 0), 0);
-        h += '<tr><td>' + esc(subj) + '</td>';
-        if (mode === 'month') {
-          const mr = mRecs[0];
-          ['hours', 'subjects', 'weekAvg', 'xufeiRate', 'jiekeRate'].forEach(k => { const c = cell(mr, k); h += '<td class="num' + (c.cls ? ' ' + c.cls : '') + '">' + c.t + '</td>'; });
-        } else {
-          monthList.forEach(m => {
-            const mr = (mMap[subj] || {})[m];
-            const c1 = cell(mr, 'hours'); h += '<td class="num' + (c1.cls ? ' ' + c1.cls : '') + '">' + c1.t + '</td>';
-            const c2 = cell(mr, 'xufeiRate'); h += '<td class="num' + (c2.cls ? ' ' + c2.cls : '') + '">' + c2.t + '</td>';
-          });
-          // 月度均课时
-          const avgH = mRecs.length ? mHours / mRecs.length : null;
-          h += '<td class="num">' + (avgH != null ? fmt(avgH, 0) : '—') + '</td>';
-        }
-        ['totalHours', 'avgSubjects', 'quarterWeekAvg', 'xufeiRate', 'jiekeRate'].forEach(k => { const c = cell(q, k); h += '<td class="num' + (c.cls ? ' ' + c.cls : '') + '">' + c.t + '</td>'; });
-        const ratio = (q && q.totalHours) ? mHours / q.totalHours : null;
-        h += '<td class="num" style="font-weight:600">' + (ratio != null ? pct(ratio) : '—') + '</td>';
-        h += '</tr>';
-      });
-    }
-    h += '</tbody></table></div>';
-    h += '<div class="preview-note">「月度明细」为筛选月份（或季度内各月）的科组原始数据；「季度汇总」为 ' + periodLabel + ' 的季度聚合（课时累加、单科数取月均、周平均/各率按口径重算）。月度课时占季度比 = 该月课时 ÷ 季度课时。</div>';
-    return { html: h, subjects, monthList, quarter, monthRecs, qAgg };
-  }
-
-  // 对比维度 → 取值（用于趋势图）。rate 类返回百分点数值，num 类返回原值。
-  function kezuDimValue(rec, dim) {
+  // 取某条记录在指定维度上的数值（月度明细 / 季度聚合通用）
+  function kezuCmpVal(rec, dim, isQuarter) {
     if (!rec) return null;
-    if (dim === 'hours') return rec.hours != null ? rec.hours : null;
-    if (dim === 'subjects') return rec.subjects != null ? rec.subjects : null;
-    if (dim === 'weekAvg') return rec.weekAvg != null ? rec.weekAvg : null;
-    if (['xufeiRate', 'jiekeRate', 'tuifeiRate', 'tingkeRate', 'quitRate'].includes(dim)) return rec[dim] != null ? +(rec[dim] * 100).toFixed(2) : null;
+    if (isQuarter) {
+      if (dim === 'hours') return rec.totalHours != null ? rec.totalHours : null;
+      if (dim === 'subjects') return rec.avgSubjects != null ? rec.avgSubjects : null;
+      if (dim === 'weekAvg') return rec.quarterWeekAvg != null ? rec.quarterWeekAvg : null;
+    } else {
+      if (dim === 'hours') return rec.hours != null ? rec.hours : null;
+      if (dim === 'subjects') return rec.subjects != null ? rec.subjects : null;
+      if (dim === 'weekAvg') return rec.weekAvg != null ? rec.weekAvg : null;
+    }
+    if (['xufeiRate', 'jiekeRate', 'tuifeiRate', 'tingkeRate', 'quitRate'].includes(dim)) {
+      return rec[dim] != null ? rec[dim] : null;
+    }
     return null;
   }
 
+  // 科组横向对比：同一科组跨不同月份（月度横向）或跨不同季度（季度横向）
+  // 两种模式均仅限同项目维度，互不包含对方的时间粒度数据。
   function renderKezuCompare() {
     const stored = STORE.list('bestkezu').map(kezuFlat);
     if (!stored.length) {
@@ -674,94 +613,107 @@
     }
     const years = [...new Set(stored.map(r => r.year))].sort((a, b) => b - a);
     const curYear = years[0];
-    const monthsAll = [...new Set(stored.filter(r => r.year === curYear).map(r => r.month))].sort((a, b) => a - b);
-    // 仅展示有数据的月份/季度
-    const quartersAvail = [...new Set(monthsAll.map(m => Math.floor((m - 1) / 3) + 1))].sort((a, b) => a - b);
 
-    let h = '<div class="panel"><div class="panel-title">月度数据 vs 季度汇总 · 横向对比</div>';
-    h += '<div class="panel-desc">将同一时间段内的「科组月度明细」与「季度汇总」并排对照，支持按月份或季度筛选，并可切换对比维度查看各维度趋势。月度课时占季度比直观反映单月贡献。</div>';
+    let h = '<div class="panel"><div class="panel-title">科组横向对比（同项目 · 跨时间）</div>';
+    h += '<div class="panel-desc">对同一科组在不同时间粒度间做横向对比：<b>月度横向对比</b>＝同一科组跨各月份比较（不含任何季度汇总）；<b>季度横向对比</b>＝同一科组跨各季度比较（不含任何月度明细）。两种模式均仅限同项目维度，互不包含对方的时间粒度数据。</div>';
     h += '<div class="toolbar" style="margin-bottom:12px">';
     h += '<label>年份</label><select id="cmpYear">' + years.map(y => '<option value="' + y + '"' + (y === curYear ? ' selected' : '') + '>' + y + ' 年</option>').join('') + '</select>';
-    h += '<label>筛选维度</label><div class="seg" id="cmpMode"><button data-m="month" class="active">按月份</button><button data-m="quarter">按季度</button></div>';
-    h += '<span id="cmpSelWrap"></span>';
-    h += '<label>对比维度</label><select id="cmpDim">' +
-      '<option value="hours">课时</option><option value="subjects">单科数</option><option value="weekAvg">周平均</option>' +
-      '<option value="xufeiRate">续费率</option><option value="jiekeRate">结课率</option><option value="tuifeiRate">退费率</option>' +
-      '<option value="tingkeRate">停课率</option><option value="quitRate">离职率</option></select>';
+    h += '<label>对比模式</label><div class="seg" id="cmpMode"><button data-m="month" class="active">月度横向对比</button><button data-m="quarter">季度横向对比</button></div>';
+    h += '<label>对比维度</label><select id="cmpDim">' + KEZU_CMP_DIMS.map(d => '<option value="' + d.k + '">' + d.l + '</option>').join('') + '</select>';
     h += '</div>';
     h += '<div id="cmpTableWrap"></div>';
     h += '<div class="chart-box" style="margin-top:16px"><canvas id="cmpChart"></canvas></div>';
     h += '</div>';
     $('#bk_compare_wrap').innerHTML = h;
 
-    function selOptions(mode, year) {
-      const ms = [...new Set(stored.filter(r => r.year === year).map(r => r.month))].sort((a, b) => a - b);
-      if (mode === 'month') {
-        return ms.map(m => '<option value="' + m + '">' + m + ' 月</option>').join('');
-      }
-      const qs = [...new Set(ms.map(m => Math.floor((m - 1) / 3) + 1))].sort((a, b) => a - b);
-      return qs.map(q => '<option value="' + q + '">Q' + q + '</option>').join('');
-    }
     function draw() {
       const year = +$('#cmpYear').value;
       const mode = $('#cmpMode').dataset.m;
       const dim = $('#cmpDim').value;
+      const dimMeta = KEZU_CMP_DIMS.find(d => d.k === dim);
       const recs = stored.filter(r => r.year === year);
-      const selWrap = $('#cmpSelWrap');
-      if (!selWrap.dataset.built || selWrap.dataset.mode !== mode) {
-        selWrap.innerHTML = '<label>' + (mode === 'month' ? '月份' : '季度') + '</label><select id="cmpSel">' + selOptions(mode, year) + '</select>';
-        selWrap.dataset.built = '1';
-        selWrap.dataset.mode = mode;
-        $('#cmpSel').addEventListener('change', draw);
+      const subjects = [...new Set(recs.map(r => r.subject))].sort((a, b) => a.localeCompare(b));
+      const isQuarter = mode === 'quarter';
+
+      // 构建 科组 × 时间 矩阵
+      let periods, pLabel, matrix;
+      if (!isQuarter) {
+        // 月度横向：仅列出该年有数据的月份（升序），数据来自科组月度明细
+        periods = [...new Set(recs.map(r => r.month))].sort((a, b) => a - b);
+        pLabel = m => m + '月';
+        const mMap = {};
+        recs.forEach(r => { (mMap[r.subject] = mMap[r.subject] || {})[r.month] = r; });
+        matrix = {};
+        subjects.forEach(s => { matrix[s] = {}; periods.forEach(m => { matrix[s][m] = mMap[s] ? mMap[s][m] : null; }); });
+      } else {
+        // 季度横向：基于 kezuQuarter 聚合，仅列出有数据的季度
+        const qAgg = kezuQuarter(recs);
+        periods = [...new Set(qAgg.map(q => q.quarter))].sort((a, b) => a - b);
+        pLabel = q => 'Q' + q;
+        const qMap = {};
+        qAgg.forEach(q => { (qMap[q.subject] = qMap[q.subject] || {})[q.quarter] = q; });
+        matrix = {};
+        subjects.forEach(s => { matrix[s] = {}; periods.forEach(q => { matrix[s][q] = qMap[s] ? qMap[s][q] : null; }); });
       }
-      const sel = $('#cmpSel').value;
-      const { html } = kezuCompareHTML(recs, mode, sel);
-      $('#cmpTableWrap').innerHTML = html;
 
-      // 趋势图：各维度按「月度」(筛选期) vs 「季度汇总」对照
-      const dimLabel = { hours: '课时', subjects: '单科数', weekAvg: '周平均', xufeiRate: '续费率', jiekeRate: '结课率', tuifeiRate: '退费率', tingkeRate: '停课率', quitRate: '离职率' }[dim];
-      const subjects = [...new Set(recs.map(r => r.subject))];
-      const qOf = m => Math.floor((m - 1) / 3) + 1;
-      const selNum = +sel;
-      let monthList;
-      if (mode === 'month') monthList = [selNum];
-      else monthList = [3 * selNum - 2, 3 * selNum - 1, 3 * selNum];
-      const monthRecs = recs.filter(r => monthList.includes(r.month));
-      const qAgg = kezuQuarter(recs).filter(q => q.quarter === (mode === 'month' ? qOf(selNum) : selNum));
-      const qMap = {}; qAgg.forEach(q => qMap[q.subject] = q);
-      const mMap = {}; monthRecs.forEach(r => { (mMap[r.subject] = mMap[r.subject] || {})[r.month] = r; });
+      const avgLabel = isQuarter ? '季均' : '月均';
+      const unit = dimMeta.kind === 'rate' ? '（%）' : '';
 
-      const monthVals = subjects.map(s => {
-        const rs = monthList.map(m => (mMap[s] || {})[m]).filter(Boolean);
-        if (!rs.length) return null;
-        if (mode === 'month') return kezuDimValue(rs[0], dim);
-        // 季度模式：取该季度内各月均值（rate 取月均、num 取月均）
-        const vals = rs.map(r => kezuDimValue(r, dim)).filter(v => v != null);
-        return vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(2) : null;
+      // —— 横向对比表：每科组一行，列为各时间粒度 ——
+      let th = '<div class="table-wrap"><table><thead><tr>';
+      th += '<th>' + (isQuarter ? '科组 \\ 季度' : '科组 \\ 月份') + '</th>';
+      periods.forEach(p => th += '<th class="num">' + pLabel(p) + '</th>');
+      th += '<th class="num">' + avgLabel + '</th>';
+      th += '</tr></thead><tbody>';
+      if (!subjects.length) {
+        th += '<tr><td colspan="' + (periods.length + 2) + '" class="empty">该年暂无科组数据</td></tr>';
+      } else {
+        subjects.forEach(subj => {
+          th += '<tr><td>' + esc(subj) + '</td>';
+          let sumV = 0, cnt = 0;
+          periods.forEach(p => {
+            const rec = matrix[subj][p];
+            const v = kezuCmpVal(rec, dim, isQuarter);
+            if (v != null) { sumV += v; cnt++; }
+            if (v == null) th += '<td class="num muted">—</td>';
+            else if (dimMeta.kind === 'rate') th += '<td class="num">' + pct(v) + '</td>';
+            else th += '<td class="num">' + fmt(v, dimMeta.d) + '</td>';
+          });
+          const avg = cnt ? sumV / cnt : null;
+          th += '<td class="num" style="font-weight:600">' + (avg == null ? '—' : (dimMeta.kind === 'rate' ? pct(avg) : fmt(avg, dimMeta.d))) + '</td>';
+          th += '</tr>';
+        });
+      }
+      th += '</tbody></table></div>';
+      th += '<div class="preview-note">' + (isQuarter
+        ? '季度横向对比：同一科组跨各季度的「' + dimMeta.l + unit + '」对比，数据来自季度聚合（课时累加、单科数取月均、周平均/各率按口径重算），<b>不含任何月度明细</b>。末列「' + avgLabel + '」为该年所列各季度的算术平均。'
+        : '月度横向对比：同一科组跨各月份的「' + dimMeta.l + unit + '」对比，数据来自科组月度明细，<b>不含任何季度汇总</b>。末列「' + avgLabel + '」为该年所列各月份的算术平均。') + '</div>';
+      $('#cmpTableWrap').innerHTML = th;
+
+      // 趋势图：每个科组一条线，X 轴为对应时间粒度
+      const datasets = subjects.map((subj, i) => {
+        const color = CMP_COLORS[i % CMP_COLORS.length];
+        const data = periods.map(p => {
+          const v = kezuCmpVal(matrix[subj][p], dim, isQuarter);
+          if (v == null) return null;
+          return dimMeta.kind === 'rate' ? +(v * 100).toFixed(2) : v;
+        });
+        return { label: subj, data, borderColor: color, backgroundColor: color, tension: .25, fill: false, spanGaps: true, pointRadius: 3 };
       });
-      const quarterVals = subjects.map(s => kezuDimValue(qMap[s], dim));
-
-      const monthLabel = mode === 'month' ? (selNum + '月') : ('季度内月均');
-      const quarterLabel = mode === 'month' ? ('Q' + qOf(selNum)) : ('Q' + selNum);
-      drawLine('cmpChart', subjects, [
-        { label: monthLabel + '·' + dimLabel, data: monthVals, borderColor: '#4F46E5', backgroundColor: 'rgba(79,70,229,.15)', tension: .25, fill: false },
-        { label: quarterLabel + '·' + dimLabel, data: quarterVals, borderColor: '#7c3aed', backgroundColor: 'rgba(124,58,237,.15)', tension: .25, fill: false, borderDash: [5, 4] },
-      ]);
+      drawLine('cmpChart', periods.map(pLabel), datasets, dimMeta.kind === 'rate' ? '%' : '');
     }
 
-    $('#cmpYear').addEventListener('change', () => { $('#cmpSelWrap').dataset.built = ''; draw(); });
+    $('#cmpYear').addEventListener('change', draw);
+    $('#cmpDim').addEventListener('change', draw);
     $all('#cmpMode button').forEach(b => b.addEventListener('click', () => {
       $all('#cmpMode button').forEach(x => x.classList.remove('active'));
       b.classList.add('active');
       $('#cmpMode').dataset.m = b.dataset.m;
-      $('#cmpSelWrap').dataset.built = '';
       draw();
     }));
-    $('#cmpDim').addEventListener('change', draw);
     $('#cmpMode').dataset.m = 'month';
     draw();
   }
-
   function renderKezu() {
     const stored = STORE.list('bestkezu').map(kezuFlat);
     let html = `
@@ -796,7 +748,7 @@
       html += '<div class="section-h">科组季度汇总（' + curYear + ' 年口径）</div><div id="bk_quarter_wrap"></div>';
       html += '<div class="section-h">科组年度汇总（' + curYear + ' 年口径）</div><div id="bk_annual_wrap"></div>';
       html += '<div class="chart-box"><canvas id="bkAnnualChart"></canvas></div></div>';
-      html += '<div class="section-h">月度数据 vs 季度汇总 · 横向对比</div><div id="bk_compare_wrap"></div>';
+      html += '<div class="section-h">科组横向对比（同项目 · 跨时间）</div><div id="bk_compare_wrap"></div>';
     } else {
       html += '<div class="panel"><div class="empty">还没有最佳科组数据。上传「泉山2026最佳科组_全年汇总」这类文件，系统会自动解析为标准格式。</div></div>';
     }
@@ -2675,13 +2627,14 @@
       options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } },
     });
   }
-  function drawLine(id, labels, datasets) {
+  function drawLine(id, labels, datasets, ySuffix) {
     destroyChart(id);
     const ctx = document.getElementById(id); if (!ctx) return;
+    const suf = (ySuffix == null) ? '%' : ySuffix;
     charts[id] = new Chart(ctx, {
       type: 'line',
       data: { labels, datasets },
-      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { ticks: { callback: v => v + '%' } } } },
+      options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { y: { ticks: { callback: v => v + suf } } } },
     });
   }
 
