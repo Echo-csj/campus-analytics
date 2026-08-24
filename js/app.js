@@ -1828,8 +1828,14 @@
     toast('模板已下载：科组周度实际数据模板.xlsx');
   }
 
-  // 生成「科组月度汇总（按周展开）」宽表 HTML（复用于核心看板与 target tab）
-  function kezuTargetWideTableHTML(res, actuals) {
+    // 预排完成率（实时口径）的课时基数：有实际完成课时(produced)时以实际为基数，
+    // 否则以参与预排课时(scheduled)为基数；分母统一为月度生产目标(final)。
+    function kezuPreBase(sched, prod) {
+      return (prod != null && prod > 0) ? prod : (sched || 0);
+    }
+
+    // 生成「科组月度汇总（按周展开）」宽表 HTML（复用于核心看板与 target tab）
+    function kezuTargetWideTableHTML(res, actuals) {
     const rows = res.rows.map(r => ({
       name: r.name, s: r.s, w: r.w || 0, weekly: r.weekly || 0, final: r.final || 0
     }));
@@ -1858,10 +1864,10 @@
       wkIdx.push({ weekTgt, weekSched, weekProd });
     }
 
-    let campusSched = 0, campusProd = 0;
-    rows.forEach(r => { campusSched += r._sched; campusProd += r._prod; });
+    let campusSched = 0, campusProd = 0, campusPreBase = 0;
+    rows.forEach(r => { campusSched += r._sched; campusProd += r._prod; campusPreBase += kezuPreBase(r._sched, r._prod); });
     const campusFinal = res.sumFinal || 0;
-    const campusPreRate = campusFinal > 0 ? campusSched / campusFinal : null;
+    const campusPreRate = campusFinal > 0 ? campusPreBase / campusFinal : null;
     const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
 
     let h = '<div class="table-wrap"><table><thead>';
@@ -1887,7 +1893,7 @@
           '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
           '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
       }
-      const preRate = r.final > 0 ? r._sched / r.final : null;
+      const preRate = r.final > 0 ? kezuPreBase(r._sched, r._prod) / r.final : null;
       const actRate = r.final > 0 ? r._prod / r.final : null;
       tr += '<td class="num">' + (r._sched > 0 ? fmt(r._sched, 1) : '<span class="muted">—</span>') + '</td>' +
         '<td class="num" style="font-weight:600">' + (r._prod > 0 ? fmt(r._prod, 1) : '<span class="muted">—</span>') + '</td>' +
@@ -1910,6 +1916,7 @@
       '<td class="num">' + (campusPreRate == null ? '<span class="muted">—</span>' : pct(campusPreRate)) + '</td>' +
       '<td class="num">' + (campusActRate == null ? '<span class="muted">—</span>' : pct(campusActRate)) + '</td></tr>';
     h += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
+    h += '<div class="preview-note">月度预排完成率为实时口径：有实际生产课时时按实际计算，无实际数据时按预排课时计算。</div>';
     return h;
   }
 
@@ -2288,6 +2295,7 @@
       sumSubHead += '</tr>';
       sum += sumHead + sumSubHead + '</thead><tbody>';
 
+      let campusPreBase = 0;
       rows.forEach(r => {
         let subjSched = 0, subjProd = 0;
         let tr = '<tr><td>' + esc(r.name) + '</td>';
@@ -2304,8 +2312,9 @@
             '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
             '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
         }
-        const preRate = r.final > 0 ? subjSched / r.final : null;
+        const preRate = r.final > 0 ? kezuPreBase(subjSched, subjProd) / r.final : null;
         const actRate = r.final > 0 ? subjProd / r.final : null;
+        campusPreBase += kezuPreBase(subjSched, subjProd);
         tr += '<td class="num">' + fmt(subjSched, 1) + '</td>' +
           '<td class="num" style="font-weight:600">' + fmt(subjProd, 1) + '</td>' +
           '<td class="num">' + (preRate == null ? '<span class="muted">—</span>' : pct(preRate)) + '</td>' +
@@ -2324,13 +2333,14 @@
           '<td class="num" style="font-weight:600">' + fmt(weekProd, 1) + '</td>' +
           '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
       }
-      const campusPreRate = campusFinal > 0 ? campusSched / campusFinal : null;
+      const campusPreRate = campusFinal > 0 ? campusPreBase / campusFinal : null;
       const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
       tfoot += '<td class="num" style="font-weight:600">' + fmt(campusSched, 1) + '</td>' +
         '<td class="num" style="font-weight:600">' + fmt(campusProd, 1) + '</td>' +
         '<td class="num">' + (campusPreRate == null ? '<span class="muted">—</span>' : pct(campusPreRate)) + '</td>' +
         '<td class="num">' + (campusActRate == null ? '<span class="muted">—</span>' : pct(campusActRate)) + '</td></tr>';
       sum += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
+      sum += '<div class="preview-note">月度预排完成率为实时口径：有实际生产课时时按实际计算，无实际数据时按预排课时计算。</div>';
 
       tw.innerHTML = top + detail + sum;
     }
