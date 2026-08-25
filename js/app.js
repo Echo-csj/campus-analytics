@@ -605,10 +605,11 @@
 
   // 科组横向对比：同一科组跨不同月份（月度横向）或跨不同季度（季度横向）
   // 两种模式均仅限同项目维度，互不包含对方的时间粒度数据。
-  function renderKezuCompare() {
+  function renderKezuCompare(containerId) {
+    containerId = containerId || 'bk_compare_wrap';
     const stored = STORE.list('bestkezu').map(kezuFlat);
     if (!stored.length) {
-      $('#bk_compare_wrap').innerHTML = '<div class="empty">还没有最佳科组月度数据，先上传并入库后在上方查看标准化数据。</div>';
+      $('#' + containerId).innerHTML = '<div class="empty">还没有最佳科组月度数据，先上传并入库后在上方查看标准化数据。</div>';
       return;
     }
     const years = [...new Set(stored.map(r => r.year))].sort((a, b) => b - a);
@@ -624,7 +625,7 @@
     h += '<div id="cmpTableWrap"></div>';
     h += '<div class="chart-box" style="margin-top:16px"><canvas id="cmpChart"></canvas></div>';
     h += '</div>';
-    $('#bk_compare_wrap').innerHTML = h;
+    $('#' + containerId).innerHTML = h;
 
     function draw() {
       const year = +$('#cmpYear').value;
@@ -1691,36 +1692,47 @@
 
   // —— 核心看板 · 最佳科组排名（基于季度评比数据）——
   function renderKezuRankDashboard() {
-    const recs = STORE.list('bestkezu_score');
-    if (!recs.length) {
-      const kezu = STORE.list('bestkezu');
+    const scoreRecs = STORE.list('bestkezu_score');
+    const monthly = STORE.list('bestkezu');
+    if (!scoreRecs.length && !monthly.length) {
       let msg = '<div class="empty">';
-      msg += '<div style="font-weight:600;margin-bottom:8px">暂无最佳科组评比数据</div>';
-      if (kezu.length) {
-        msg += '<div>检测到「最佳科组」板块已有 <b>' + kezu.length + '</b> 条科组×月度数据，但缺少「评比结果」数据。</div>';
+      msg += '<div style="font-weight:600;margin-bottom:8px">暂无最佳科组数据</div>';
+      if (monthly.length) {
+        msg += '<div>检测到「最佳科组」板块已有 <b>' + monthly.length + '</b> 条科组×月度数据，但缺少「评比结果」数据。</div>';
         msg += '<div style="margin-top:8px">原因通常是：</div><ul style="text-align:left;display:inline-block;margin:6px 0">';
         msg += '<li>上传的文件里<strong>没有 Sheet5『最佳科组评比汇总』</strong>，或该 sheet 名称不包含“评比/排名/最佳科组”等关键词；</li>';
         msg += '<li>有评比表，但解析后<strong>未点击「确认入库」</strong>；</li>';
         msg += '<li>之后点击了「清空本科组数据」，把评比数据一起清除了。</li></ul>';
         msg += '<div>请重新上传含评比汇总的原始全量文件，并在「最佳科组」模块点击<strong>确认入库</strong>。</div>';
       } else {
-        msg += '<div>请先在「最佳科组」模块上传含『最佳科组评比汇总』(Sheet5) 的全量文件并入库，即可在此查看各季度与全年排名。</div>';
+        msg += '<div>请先在「最佳科组」模块上传含『最佳科组评比汇总』(Sheet5) 的全量文件并入库，即可在此查看各季度排名、全年排名与横向对比。</div>';
       }
       msg += '</div>';
       $('#dashBody').innerHTML = msg;
       return;
     }
-    const years = recs.map(r => r.year).filter(y => y).sort((a, b) => b - a);
-    const yr = years[0];
-    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="kezuRankYr">' +
-      years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>';
-    html += '<div id="kezuRankResult"></div>';
+
+    let html = '';
+    // 排名部分：依赖评比汇总数据（bestkezu_score）
+    if (scoreRecs.length) {
+      const years = scoreRecs.map(r => r.year).filter(y => y).sort((a, b) => b - a);
+      const yr = years[0];
+      html += '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="kezuRankYr">' +
+        years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
+        '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>';
+      html += '<div id="kezuRankResult"></div>';
+    } else {
+      html += '<div class="preview-note" style="margin-bottom:12px">⚠ 当前仅有科组月度明细，缺少「最佳科组评比汇总」(Sheet5)，暂无法呈现季度/全年排名；下方为可用的横向对比数据。</div>';
+    }
+    // 横向对比部分：依赖科组月度明细（bestkezu），与排名互不耦合
+    if (monthly.length) {
+      html += '<div id="kezuCmpDashWrap"></div>';
+    }
     $('#dashBody').innerHTML = html;
-    $('#kezuRankYr').addEventListener('change', draw);
+
     function draw() {
       const y = parseInt($('#kezuRankYr').value, 10);
-      const rec = recs.find(r => r.year === y) || recs[0];
+      const rec = scoreRecs.find(r => r.year === y) || scoreRecs[0];
       const score = rec.values || {};
       const rating = score.rating;
       let h = '';
@@ -1748,7 +1760,13 @@
       }
       $('#kezuRankResult').innerHTML = h;
     }
-    draw();
+    if (scoreRecs.length) {
+      $('#kezuRankYr').addEventListener('change', draw);
+      draw();
+    }
+    if (monthly.length) {
+      renderKezuCompare('kezuCmpDashWrap');
+    }
   }
 
 
