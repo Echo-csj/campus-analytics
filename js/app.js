@@ -827,8 +827,162 @@
       html += '</tbody></table></div>';
     }
     html += '</div>';
+    // 教师基本信息子面板
+    html += '<div class="panel"><div class="panel-title">教师基本信息（花名册）</div>';
+    html += '<div class="panel-desc">教师基础档案台账：姓名 / 性别 / 职称 / 任教科目 / 所属院系 / 岗位 / 联系方式 / 学历 / 毕业院校 / 专业 / 入职日期 / 证书。工龄按入职日期自动计算；点击「新增教师」在线录入，数据随浏览器本地备份（data.json）。</div>';
+    html += '<div class="row" style="margin-bottom:12px"><button class="btn primary" id="ti_add">+ 新增教师</button><button class="btn" id="ti_export">导出 Excel</button></div>';
+    html += '<div id="ti_body"></div></div>';
     $('#content').innerHTML = html;
     wireUpload('kpi');
+    $('#ti_add').addEventListener('click', () => openTeacherForm(null));
+    $('#ti_export').addEventListener('click', exportTeacherInfo);
+    renderTeacherInfoPanel();
+  }
+
+  // —— 教师基本信息（花名册，独立流 teacherInfo）——
+  const TEACHER_FIELDS = [
+    { key: 'name', label: '姓名', req: true },
+    { key: 'gender', label: '性别' },
+    { key: 'title', label: '职称' },
+    { key: 'subject', label: '任教科目' },
+    { key: 'dept', label: '所属院系' },
+    { key: 'post', label: '岗位' },
+    { key: 'contact', label: '联系方式' },
+    { key: 'education', label: '学历' },
+    { key: 'school', label: '毕业院校' },
+    { key: 'major', label: '专业' },
+    { key: 'entryDate', label: '入职日期', type: 'date' },
+    { key: 'cert', label: '证书' },
+  ];
+  const TEACHER_GROUPS = [
+    { title: '身份信息', keys: ['name', 'gender', 'title'] },
+    { title: '教学信息', keys: ['subject', 'dept', 'post'] },
+    { title: '联系信息', keys: ['contact'] },
+    { title: '教育背景', keys: ['education', 'school', 'major'] },
+    { title: '任职信息', keys: ['entryDate', 'cert'] },
+  ];
+  function computeTenure(entryDate) {
+    if (!entryDate) return '—';
+    const d = new Date(entryDate);
+    if (isNaN(d.getTime())) return '—';
+    const now = new Date();
+    let years = now.getFullYear() - d.getFullYear();
+    let months = now.getMonth() - d.getMonth();
+    let days = now.getDate() - d.getDate();
+    if (days < 0) { months--; const pd = new Date(now.getFullYear(), now.getMonth(), 0); days += pd.getDate(); }
+    if (months < 0) { years--; months += 12; }
+    return years + '年' + months + '个月' + (days > 0 ? days + '天' : '');
+  }
+  function teacherInfoRecs() {
+    return STORE.list('teacherInfo').slice().sort((a, b) => {
+      const sa = a.values && a.values.seq != null ? a.values.seq : 9999;
+      const sb = b.values && b.values.seq != null ? b.values.seq : 9999;
+      if (sa !== sb) return sa - sb;
+      return (a.dimension || '').localeCompare(b.dimension || '');
+    });
+  }
+  function renderTeacherInfoPanel() {
+    const wrap = $('#ti_body'); if (!wrap) return;
+    const recs = teacherInfoRecs();
+    let h = '';
+    if (!recs.length) {
+      h += '<div class="empty">还没有教师基本信息，点击「新增教师」录入，字段与桌面 Excel 模板一致。</div>';
+    } else {
+      h += '<div class="table-wrap"><table><thead><tr>' +
+        '<th>序号</th><th>姓名</th><th>性别</th><th>职称</th><th>任教科目</th><th>所属院系</th><th>岗位</th><th>联系方式</th><th>学历</th><th>毕业院校</th><th>专业</th><th>入职日期</th><th>工龄</th><th>证书</th><th>操作</th>' +
+        '</tr></thead><tbody>';
+      recs.forEach((r, i) => {
+        const v = r.values || {};
+        h += '<tr>' +
+          '<td class="num">' + (v.seq != null ? v.seq : (i + 1)) + '</td>' +
+          '<td>' + esc(v.name || r.dimension || '') + '</td>' +
+          '<td>' + esc(v.gender || '') + '</td>' +
+          '<td>' + esc(v.title || '') + '</td>' +
+          '<td>' + esc(v.subject || '') + '</td>' +
+          '<td>' + esc(v.dept || '') + '</td>' +
+          '<td>' + esc(v.post || '') + '</td>' +
+          '<td>' + esc(v.contact || '') + '</td>' +
+          '<td>' + esc(v.education || '') + '</td>' +
+          '<td>' + esc(v.school || '') + '</td>' +
+          '<td>' + esc(v.major || '') + '</td>' +
+          '<td>' + esc(v.entryDate || '') + '</td>' +
+          '<td>' + esc(computeTenure(v.entryDate)) + '</td>' +
+          '<td>' + esc(v.cert || '') + '</td>' +
+          '<td><button class="btn sm" data-edit="' + esc(r.dimension) + '">编辑</button> <button class="btn sm ghost" data-del="' + esc(r.dimension) + '">删除</button></td>' +
+          '</tr>';
+      });
+      h += '</tbody></table></div>';
+    }
+    wrap.innerHTML = h;
+    wrap.querySelectorAll('[data-edit]').forEach(b => b.addEventListener('click', () => {
+      const rec = recs.find(r => r.dimension === b.dataset.edit);
+      openTeacherForm(rec || null);
+    }));
+    wrap.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', () => {
+      if (confirm('确定删除教师「' + b.dataset.del + '」的基本信息？')) {
+        STORE.remove('teacherInfo', 0, 0, 0, b.dataset.del);
+        toast('已删除');
+        renderTeacherInfoPanel();
+      }
+    }));
+  }
+  function openTeacherForm(rec) {
+    const v = rec ? (rec.values || {}) : {};
+    const oldName = rec ? rec.dimension : null;
+    let body = '';
+    TEACHER_GROUPS.forEach(g => {
+      body += '<div class="form-group-h">' + g.title + '</div><div class="form-grid">';
+      g.keys.forEach(k => {
+        const f = TEACHER_FIELDS.find(x => x.key === k);
+        const val = v[k] != null ? v[k] : '';
+        const inputType = f.type === 'date' ? 'date' : 'text';
+        body += '<div class="field"><label>' + f.label + (f.req ? ' *' : '') + '</label>' +
+          '<input type="' + inputType + '" id="tif_' + k + '" value="' + esc(val) + '"' + (f.req ? ' data-req="1"' : '') + ' /></div>';
+      });
+      body += '</div>';
+    });
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'ti_modal';
+    overlay.innerHTML = '<div class="modal"><div class="modal-head"><span>' + (rec ? '编辑教师' : '新增教师') + '</span><button class="modal-x" id="ti_x" type="button">×</button></div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      '<div class="modal-foot"><button class="btn ghost" id="ti_cancel" type="button">取消</button><button class="btn primary" id="ti_save" type="button">保存</button></div></div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+    function close() { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 180); }
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    $('#ti_x').addEventListener('click', close);
+    $('#ti_cancel').addEventListener('click', close);
+    $('#ti_save').addEventListener('click', () => {
+      const data = {};
+      let ok = true;
+      TEACHER_FIELDS.forEach(f => {
+        const el = $('#tif_' + f.key);
+        data[f.key] = el ? el.value.trim() : '';
+        if (f.req && !data[f.key]) ok = false;
+      });
+      if (!ok) { toast('请填写姓名'); return; }
+      const recs = teacherInfoRecs();
+      const existingSeq = (rec && v.seq != null) ? v.seq : null;
+      const nextSeq = recs.length ? Math.max(0, ...recs.map(r => (r.values && r.values.seq) || 0)) + 1 : 1;
+      data.seq = existingSeq != null ? existingSeq : nextSeq;
+      if (oldName && oldName !== data.name) STORE.remove('teacherInfo', 0, 0, 0, oldName);
+      STORE.upsert({ stream: 'teacherInfo', year: 0, month: 0, week: 0, dimension: data.name, values: data, importedAt: Date.now() });
+      toast(rec ? '已更新' : '已新增');
+      close();
+      renderTeacherInfoPanel();
+    });
+  }
+  function exportTeacherInfo() {
+    const recs = teacherInfoRecs();
+    if (!recs.length) { toast('暂无教师基本信息'); return; }
+    const header = ['序号', '姓名', '性别', '职称', '任教科目', '所属院系', '岗位', '联系方式', '学历', '毕业院校', '专业', '入职日期', '工龄', '证书'];
+    const rows = recs.map((r, i) => {
+      const v = r.values || {};
+      const t = computeTenure(v.entryDate);
+      return [v.seq != null ? v.seq : (i + 1), v.name || r.dimension || '', v.gender || '', v.title || '', v.subject || '', v.dept || '', v.post || '', v.contact || '', v.education || '', v.school || '', v.major || '', v.entryDate || '', (t === '—' ? '' : t), v.cert || ''];
+    });
+    exportSheets('教师基本信息.xlsx', [{ name: '教师基本信息', header, rows }]);
   }
 
   // —— 五项满意度（核心看板子页签）——
