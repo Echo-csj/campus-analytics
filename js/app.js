@@ -830,11 +830,13 @@
     // 教师基本信息子面板
     html += '<div class="panel"><div class="panel-title">教师基本信息（花名册）</div>';
     html += '<div class="panel-desc">教师基础档案台账：姓名 / 性别 / 职称 / 任教科目 / 所属院系 / 岗位 / 联系方式 / 学历 / 毕业院校 / 专业 / 入职日期 / 证书。工龄按入职日期自动计算；点击「新增教师」在线录入，数据随浏览器本地备份（data.json）。</div>';
-    html += '<div class="row" style="margin-bottom:12px"><button class="btn primary" id="ti_add">+ 新增教师</button><button class="btn" id="ti_export">导出 Excel</button></div>';
+    html += '<div class="row" style="margin-bottom:12px"><button class="btn primary" id="ti_add">+ 新增教师</button><button class="btn" id="ti_import">导入 Excel</button><button class="btn" id="ti_export">导出 Excel</button><input type="file" id="ti_file" accept=".xlsx,.xls,.csv" hidden /></div>';
     html += '<div id="ti_body"></div></div>';
     $('#content').innerHTML = html;
     wireUpload('kpi');
     $('#ti_add').addEventListener('click', () => openTeacherForm(null));
+    $('#ti_import').addEventListener('click', () => $('#ti_file').click());
+    $('#ti_file').addEventListener('change', e => { const f = e.target.files[0]; if (f) importTeacherInfo(f); e.target.value = ''; });
     $('#ti_export').addEventListener('click', exportTeacherInfo);
     renderTeacherInfoPanel();
   }
@@ -983,6 +985,119 @@
       return [v.seq != null ? v.seq : (i + 1), v.name || r.dimension || '', v.gender || '', v.title || '', v.subject || '', v.dept || '', v.post || '', v.contact || '', v.education || '', v.school || '', v.major || '', v.entryDate || '', (t === '—' ? '' : t), v.cert || ''];
     });
     exportSheets('教师基本信息.xlsx', [{ name: '教师基本信息', header, rows }]);
+  }
+
+  // 表头别名 → 字段 key（与 TEACHER_FIELDS 一致）
+  const TEACHER_HEADER_ALIAS = {
+    name: ['姓名', '教师', '名字', '名称', '老师'],
+    gender: ['性别'],
+    title: ['职称', '级别', '职务级别'],
+    subject: ['任教科目', '科目', '学科', '学科组', '所教科目'],
+    dept: ['所属院系', '院系', '部门', '所属部门', '学院'],
+    post: ['岗位', '职务', '职位'],
+    contact: ['联系方式', '电话', '手机', '手机号', '联系电话', '微信', '邮箱'],
+    education: ['学历', '学位', '文化程度'],
+    school: ['毕业院校', '院校', '学校', '毕业学校'],
+    major: ['专业', '所学专业'],
+    entryDate: ['入职日期', '入职时间', '到岗日期', '参加工作时间'],
+    cert: ['证书', '资质', '资格证书', '证照'],
+    seq: ['序号', '编号'],
+  };
+  function mapTeacherHeader(row) {
+    const map = {};
+    if (!row) return map;
+    row.forEach((cell, ci) => {
+      const s = String(cell == null ? '' : cell).trim().toLowerCase();
+      if (!s) return;
+      for (const key in TEACHER_HEADER_ALIAS) {
+        if (TEACHER_HEADER_ALIAS[key].includes(s)) { map[ci] = key; break; }
+      }
+    });
+    return map;
+  }
+  function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+  function fmTeacherDate(v) {
+    if (v == null || v === '') return '';
+    if (v instanceof Date) { const d = v; return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+    if (typeof v === 'number') { const d = new Date((v - 25569) * 86400000); if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+    const s = String(v).trim();
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate());
+    return null; // 无法识别
+  }
+  function importTeacherInfo(file) {
+    if (typeof XLSX === 'undefined') { toast('Excel 解析组件未加载，请刷新页面重试'); return; }
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const wb = XLSX.read(new Uint8Array(ev.target.result), { type: 'array', cellDates: true });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false, cellDates: true });
+        if (!aoa.length) { toast('文件为空'); return; }
+        // 定位表头行（含「姓名/教师」）
+        let headerIdx = -1, colMap = {};
+        for (let r = 0; r < aoa.length; r++) {
+          const m = mapTeacherHeader(aoa[r]);
+          if (Object.values(m).indexOf('name') >= 0) { headerIdx = r; colMap = m; break; }
+        }
+        if (headerIdx < 0) { toast('未找到含「姓名/教师」表头的行，请检查表格格式'); return; }
+        const dataRows = aoa.slice(headerIdx + 1);
+        const existing = teacherInfoRecs();
+        const existingNames = new Set(existing.map(r => (r.dimension || '').toLowerCase()).filter(Boolean));
+        const batchSeen = new Set();
+        let maxSeq = existing.reduce((m, r) => Math.max(m, (r.values && r.values.seq) || 0), 0);
+        const toInsert = [], errors = [];
+        dataRows.forEach((row, i) => {
+          const excelRow = headerIdx + 2 + i; // 表格内的实际行号（1-based）
+          const raw = {};
+          for (const ci in colMap) raw[colMap[ci]] = String(row[ci] == null ? '' : row[ci]).trim();
+          if (!raw.name) { errors.push({ row: excelRow, name: '(空)', reason: '缺少姓名' }); return; }
+          const ed = fmTeacherDate(raw.entryDate);
+          if (raw.entryDate && ed === null) { errors.push({ row: excelRow, name: raw.name, reason: '入职日期格式无法识别：' + raw.entryDate }); return; }
+          const nk = raw.name.toLowerCase();
+          if (existingNames.has(nk) || batchSeen.has(nk)) { errors.push({ row: excelRow, name: raw.name, reason: '姓名重复（' + (existingNames.has(nk) ? '与已有记录重复' : '本批次内重复') + '）' }); return; }
+          const values = {};
+          TEACHER_FIELDS.forEach(f => { values[f.key] = raw[f.key] || ''; });
+          values.entryDate = ed || '';
+          const seq = (raw.seq && !isNaN(+raw.seq)) ? (+raw.seq) : (++maxSeq);
+          values.seq = seq;
+          batchSeen.add(nk);
+          toInsert.push({ name: raw.name, values });
+        });
+        if (!toInsert.length && !errors.length) { toast('文件中没有可导入的数据行'); return; }
+        toInsert.forEach(t => STORE.upsert({ stream: 'teacherInfo', year: 0, month: 0, week: 0, dimension: t.name, values: t.values, importedAt: Date.now() }));
+        renderTeacherInfoPanel();
+        showImportResult(toInsert.length, errors);
+      } catch (err) {
+        console.error(err);
+        toast('解析失败：' + (err && err.message ? err.message : '未知错误'));
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  function showImportResult(success, errors) {
+    let body = '<div class="import-summary"><span class="ok">成功导入 ' + success + ' 条</span>';
+    if (errors.length) body += '<span class="bad">未导入（失败） ' + errors.length + ' 条</span>';
+    body += '</div>';
+    if (errors.length) {
+      body += '<div class="import-err-title">失败明细（格式错误 / 重复姓名）</div><div class="import-err-list">';
+      errors.forEach(en => { body += '<div class="import-err-item">第 ' + en.row + ' 行 · ' + esc(en.name) + '：' + esc(en.reason) + '</div>'; });
+      body += '</div>';
+    } else {
+      body += '<div class="preview-note">全部数据校验通过，已写入系统。</div>';
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'ti_import_modal';
+    overlay.innerHTML = '<div class="modal"><div class="modal-head"><span>批量导入结果</span><button class="modal-x" type="button" id="ti_imp_x">×</button></div>' +
+      '<div class="modal-body">' + body + '</div>' +
+      '<div class="modal-foot"><button class="btn primary" type="button" id="ti_imp_ok">知道了</button></div></div>';
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('show'));
+    function close() { overlay.classList.remove('show'); setTimeout(() => overlay.remove(), 180); }
+    overlay.addEventListener('click', ev => { if (ev.target === overlay) close(); });
+    $('#ti_imp_x').addEventListener('click', close);
+    $('#ti_imp_ok').addEventListener('click', close);
   }
 
   // —— 五项满意度（核心看板子页签）——

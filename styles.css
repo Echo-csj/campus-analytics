@@ -366,3 +366,13 @@ tr.winner td:first-child { font-weight: 700; color: var(--indigo); }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .form-grid .field input { width: 100%; min-width: 0; }
 @media (max-width: 560px) { .form-grid { grid-template-columns: 1fr; } }
+
+/* 导入结果反馈 */
+.import-summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; font-weight: 600; }
+.import-summary .ok { color: #16a34a; }
+.import-summary .bad { color: #dc2626; }
+.import-err-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.import-err-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle); }
+.import-err-item { padding: 9px 12px; font-size: 13px; border-bottom: 1px solid var(--border); font-family: var(--mono); }
+.import-err-item:last-child { border-bottom: none; }
+.import-err-item::before { content: "✕"; color: #dc2626; font-weight: 700; margin-right: 8px; }
