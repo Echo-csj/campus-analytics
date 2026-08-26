@@ -190,52 +190,80 @@
     return { columns, rows };
   }
 
-  // 教师 KPI：月度汇总（按 年-月-教师）
-  function kpiMonthly(kpiRecs) {
-    const groups = {};
-    kpiRecs.forEach(r => {
-      const k = r.year + '-' + r.month + '-' + r.dimension;
-      if (!groups[k]) groups[k] = { year: r.year, month: r.month, dimension: r.dimension, _weeks: [] };
-      groups[k]._weeks.push(r);
-    });
-    return Object.values(groups).map(g => {
-      const v = {};
-      ['weekHours', 'weekSessions', 'weekRefSessions'].forEach(f => v[f] = g._weeks.reduce((s, r) => s + (r.values[f] || 0), 0));
-      const last = [...g._weeks].reverse().find(r => r.values.progressRate != null);
-      v.progressRate = last ? last.values.progressRate : null;
-      const first = g._weeks[0];
-      v.subjectGroup = first ? first.values.subjectGroup : null;
-      v.saturation = v.weekRefSessions ? v.weekSessions / v.weekRefSessions : null;
-      return { year: g.year, month: g.month, dimension: g.dimension, values: v };
-    });
+  // —— 教师 KPI（新版：教师个人月度台账，stream='tkpi'）——
+  // 月度派生值：总学员数 / 参考课次 / 月饱和度 / 月度周平均（不落库，读取时统一计算）
+  function tkpiMonthDerived(v) {
+    const v1 = +(v.v1Students || 0), v6 = +(v.v6Students || 0);
+    const wk = +(v.weekSeq || 0);
+    const totalStudents = v1 + v6;
+    const refSessions = wk * 16;
+    const monthSessions = +(v.monthSessions || 0);
+    const saturation = refSessions ? monthSessions / refSessions : null;
+    const v1Sessions = +(v.v1Sessions || 0);
+    const weekAvg = (wk && v1) ? v1Sessions * 3 / v1 / wk : null;
+    return { totalStudents, refSessions, saturation, weekAvg };
   }
 
-  // 教师 KPI：半年度汇总（按 年-半年-教师）
-  function kpiHalfYear(kpiRecs, year, half) {
-    const months = half === 1 ? [1, 2, 3, 4, 5, 6] : [7, 8, 9, 10, 11, 12];
-    const monthly = kpiMonthly(kpiRecs).filter(r => r.year === year && months.includes(r.month));
+  // 半年度标签：上半年 = 3-8月（当年）；下半年 = 9-2月（9-12月属当年，1-2月属上一年）
+  function tkpiHalfLabel(year, month) {
+    if (month >= 3 && month <= 8) return { label: year + '上半年', year, half: 1 };
+    if (month >= 9) return { label: year + '下半年', year, half: 2 };
+    return { label: (year - 1) + '下半年', year: year - 1, half: 2 }; // 1-2月
+  }
+
+  // 教师 KPI：半年度汇总（按 教师 × 半年度）
+  // 口径（2026-08-26 用户确认）：
+  //   总/1V1/1V6 学员数 = 半年内最新月份的值；课次/参考课次 = 累计；饱和度 = 累计课次 ÷ 累计参考课次
+  //   周平均/1V1停课人数 = 各月平均数；结课/退费/续费/参评单科数 = 累计
+  //   优秀/及格 = 两次专业考结果直接体现（H1：3月&6月，H2：9月&12月）
+  //   进步率 = 两次进步率平均值（H1：4月&6月，H2：11月&1月）
+  //   半年内无数据的月份按 0 计；整个半年无记录的教师由调用方补零行。
+  function tkpiHalfYear(recs) {
     const groups = {};
-    monthly.forEach(r => {
-      const k = r.dimension;
-      if (!groups[k]) groups[k] = { dimension: r.dimension, _months: [] };
+    recs.forEach(r => {
+      const hl = tkpiHalfLabel(r.year, r.month);
+      const k = hl.label + '|' + r.dimension;
+      if (!groups[k]) groups[k] = { label: hl.label, year: hl.year, half: hl.half, dimension: r.dimension, _months: [] };
       groups[k]._months.push(r);
     });
     return Object.values(groups).map(g => {
-      const v = {};
-      ['weekHours', 'weekSessions', 'weekRefSessions'].forEach(f => v[f] = g._months.reduce((s, r) => s + (r.values[f] || 0), 0));
-      v.saturation = v.weekRefSessions ? v.weekSessions / v.weekRefSessions : null;
-      const last = [...g._months].reverse().find(r => r.values.progressRate != null);
-      v.progressRate = last ? last.values.progressRate : null;
-      v.subjectGroup = g._months[0] ? g._months[0].values.subjectGroup : null;
-      const totalHours = v.weekHours;
-      // 级别评定（专业分默认 0，可在半年复盘面板补；文化/日常默认满分）
-      const lvl = CA.rulebook.teacherLevelTotal({
-        progressRate: v.progressRate || 0,
-        profScore: 0,
-        saturation: v.saturation || 0,
-        culture: 30, daily: 15,
-      });
-      return { year, half, dimension: g.dimension, values: v, level: lvl, totalHours };
+      const ms = g._months.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month));
+      const latest = ms[ms.length - 1];
+      const lv = latest ? latest.values : {};
+      const sum = f => ms.reduce((s, r) => s + (+(r.values[f] || 0)), 0);
+      const mean = f => {
+        const arr = ms.map(r => r.values[f]).filter(x => x != null && isFinite(x));
+        return arr.length ? arr.reduce((s, x) => s + x, 0) / arr.length : 0;
+      };
+      const sessions = sum('monthSessions');
+      const refSessions = ms.reduce((s, r) => s + (tkpiMonthDerived(r.values).refSessions || 0), 0);
+      const weekAvgs = ms.map(r => tkpiMonthDerived(r.values).weekAvg).filter(x => x != null && isFinite(x));
+      const examMonths = g.half === 1 ? [3, 6] : [9, 12];
+      const progMonths = g.half === 1 ? [4, 6] : [11, 1];
+      const examResults = examMonths.map(m => {
+        const rec = ms.find(r => r.month === m && r.values.examResult != null && String(r.values.examResult).trim() !== '');
+        return rec ? { m, r: String(rec.values.examResult).trim() } : null;
+      }).filter(Boolean);
+      const progVals = progMonths.map(m => {
+        const rec = ms.find(r => r.month === m && r.values.progressRate != null && isFinite(r.values.progressRate));
+        return rec ? rec.values.progressRate : null;
+      }).filter(x => x != null);
+      return {
+        label: g.label, year: g.year, half: g.half, dimension: g.dimension,
+        values: {
+          subjectGroup: ms[0] ? ms[0].values.subjectGroup : '',
+          totalStudents: (lv.v1Students || 0) + (lv.v6Students || 0),
+          v1Students: lv.v1Students || 0, v6Students: lv.v6Students || 0,
+          sessions, refSessions,
+          saturation: refSessions ? sessions / refSessions : null,
+          weekAvg: weekAvgs.length ? weekAvgs.reduce((s, x) => s + x, 0) / weekAvgs.length : 0,
+          stopCount: mean('stopCount'),
+          gradCount: sum('gradCount'), refundCount: sum('refundCount'), renewCount: sum('renewCount'),
+          evalSubjects: sum('evalSubjects'),
+          examResults,
+          progressRate: progVals.length ? progVals.reduce((s, x) => s + x, 0) / progVals.length : 0,
+        },
+      };
     });
   }
 
@@ -503,7 +531,7 @@
   CA.aggregate = {
     DATA_LAYERS,
     monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
-    manualLastDay, manualMonthOf, manualMonthWeekCount, kpiMonthly, kpiHalfYear, satisfactionFromMonthEnd, yearOptions,
+    manualLastDay, manualMonthOf, manualMonthWeekCount, tkpiMonthDerived, tkpiHalfLabel, tkpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate,
     YEARLY_RULES, yearlyAggregate,
   };

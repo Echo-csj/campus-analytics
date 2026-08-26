@@ -87,6 +87,7 @@ body {
 .btn.primary:hover { background: var(--indigo-hover); }
 .btn.ghost { background: transparent; }
 .btn.sm { padding: 4px 10px; font-size: 12px; }
+.btn.xs { padding: 1px 8px; font-size: 12px; }
 .btn:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; transform: none; }
 .btn:disabled:hover { box-shadow: none; transform: none; }
 
@@ -142,6 +143,42 @@ table tfoot td .muted { color: var(--text-3); }
 
 /* Charts */
 .chart-box { height: 340px; position: relative; }
+
+/* Modal（导入结果 / 通用弹层） */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(15, 23, 42, .45);
+  display: none; align-items: center; justify-content: center; z-index: 100; padding: 20px;
+}
+.modal-overlay.show { display: flex; }
+.modal {
+  background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  width: 100%; max-width: 640px; max-height: 88vh; display: flex; flex-direction: column;
+  box-shadow: var(--shadow-hover);
+}
+.modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 14px;
+}
+.modal-x {
+  border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-3);
+  width: 28px; height: 28px; border-radius: 6px;
+}
+.modal-x:hover { color: var(--text); background: var(--bg-subtle); }
+.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-foot { padding: 12px 18px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: 8px; }
+
+/* 导入结果反馈 */
+.import-summary { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 14px; font-size: 14px; font-weight: 600; }
+.import-summary .ok { color: #16a34a; }
+.import-summary .upd { color: var(--indigo); }
+.import-summary .bad { color: #dc2626; }
+.import-note { font-size: 12.5px; color: var(--amber); background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius-sm); padding: 7px 10px; margin-bottom: 8px; }
+.import-note.ok-note { color: #16a34a; background: #f0fdf4; border-color: #bbf7d0; }
+.import-err-title { font-size: 12.5px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.import-err-list { max-height: 320px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-subtle); }
+.import-err-item { padding: 9px 12px; font-size: 13px; border-bottom: 1px solid var(--border); font-family: var(--mono); }
+.import-err-item:last-child { border-bottom: none; }
+.import-err-item::before { content: "✕"; color: #dc2626; font-weight: 700; margin-right: 8px; }
 
 /* Toast */
 .toast {

@@ -142,6 +142,27 @@
     { key: 'progressRate', label: '周进步率', type: 'ratio', desc: '可选；半年度取季度考进步率' },
   ];
 
+  // —— 教师 KPI（新版：教师个人月度台账，横表录入，stream='tkpi'）——
+  // 维度：教师；主键 tkpi|year|month|0|教师名。每月一行（一位教师 × 一个月），直接录入。
+  // 派生值不落库、读取时统一由 aggregate.tkpiMonthDerived 计算：总学员数 / 参考课次 / 月饱和度 / 月度周平均。
+  const tkpiFields = [
+    { key: 'subjectGroup', label: '学科组', type: 'text', desc: '所属学科组（可空）' },
+    { key: 'v1Students', label: '1V1学员数', type: 'num', desc: '月度在读 1V1 学员数' },
+    { key: 'v6Students', label: '1V6学员数', type: 'num', desc: '月度在读 1V6 学员数' },
+    { key: 'monthSessions', label: '月度课次', type: 'num', desc: '当月实际上课次数' },
+    { key: 'weekSeq', label: '周次', type: 'num', desc: '当月周数（参考课次=周次×16）；空则自动取月度数据源当月周数' },
+    { key: 'v1Sessions', label: '月度1V1课次', type: 'num', desc: '当月 1V1 上课次数' },
+    { key: 'stopCount', label: '1V1停课人数', type: 'num' },
+    { key: 'gradCount', label: '1V1结课人数', type: 'num' },
+    { key: 'refundCount', label: '1V1退费人数', type: 'num' },
+    { key: 'renewCount', label: '1V1续费人数', type: 'num' },
+    { key: 'examScore', label: '专业考分数', type: 'num', desc: '季度数据：仅 3/6/9/12 月填写' },
+    { key: 'examRank', label: '专业考排名', type: 'num', desc: '季度数据：仅 3/6/9/12 月填写' },
+    { key: 'examResult', label: '优秀/及格', type: 'text', desc: '季度数据：仅 3/6/9/12 月填写' },
+    { key: 'progressRate', label: '进步率', type: 'ratio', desc: '季度数据：仅 1/4/6/11 月填写；存小数（35%=0.35）' },
+    { key: 'evalSubjects', label: '参评单科数', type: 'num', desc: '季度数据：仅 3/6/9/12 月填写' },
+  ];
+
   // 标签 → 字段 反查表（一键提取用）
   const weeklyLabelMap = {};
   weeklyFields.forEach(f => { weeklyLabelMap[f.label] = f; });
@@ -162,7 +183,7 @@
 
   CA.SCHEMA = {
     weeklyFields, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
-    kezuFields, kpiFields,
+    kezuFields, kpiFields, tkpiFields,
   };
 
 })(window);

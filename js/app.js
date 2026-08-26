@@ -786,49 +786,362 @@
     renderKezuCompare();
   }
 
-  // —— 教师 KPI ——
-  function renderKpi() {
-    let html = uploadPanelHTML('kpi');
-    const recs = STORE.list('kpi');
-    const monthly = AGG.kpiMonthly(recs);
-    html += '<div class="panel"><div class="panel-title">月度汇总（按 年-月-教师）</div>';
-    html += '<div class="panel-desc">周课时/课次/参考课次累加；月饱和度 = 月课次 / 月参考课次。</div>';
-    if (!monthly.length) html += '<div class="empty">还没有教师周报，先上传「教师周报」。</div>';
-    else {
-      html += '<div class="table-wrap"><table><thead><tr><th>年</th><th>月</th><th>教师</th><th>学科组</th><th class="num">月课时</th><th class="num">月课次</th><th class="num">月参考课次</th><th class="num">月饱和度</th></tr></thead><tbody>';
-      monthly.sort((a, b) => (b.year - a.year) || (b.month - b.month) || a.dimension.localeCompare(b.dimension)).forEach(r => {
-        const v = r.values;
-        html += '<tr><td>' + r.year + '</td><td>' + r.month + '</td><td>' + r.dimension + '</td><td>' + (v.subjectGroup || '—') + '</td>' +
-          '<td class="num">' + fmt(v.weekHours) + '</td><td class="num">' + fmt(v.weekSessions) + '</td><td class="num">' + fmt(v.weekRefSessions) + '</td>' +
-          '<td class="num">' + pct(v.saturation) + '</td></tr>';
-      });
-      html += '</tbody></table></div>';
+  // —— 教师 KPI（新版：教师个人月度台账，横表导入）——
+  // 数据：stream='tkpi'，每行 = 一位教师 × 一个月。
+  // 派生（不落库，统一由 AGG.tkpiMonthDerived 计算）：总学员数=1V1+1V6；参考课次=周次×16；
+  //   月饱和度=月度课次÷参考课次；月度周平均=1V1课次×3÷1V1学员数÷周次。
+  // 半年度：上半年=3-8月，下半年=9-2月（跨年）；半年内无数据的月份按 0 计。
+  const TKPI_STREAM = 'tkpi';
+  const TKPI_HEADER_ALIAS = {
+    teacher: ['教师', '姓名', '名字', '名称', '老师', '任课教师'],
+    month: ['月份', '年月', '统计月份', '统计月', '日期', '月度'],
+    subjectGroup: ['学科组', '科组', '科目组', '组别', '学科'],
+    v1Students: ['1V1学员数', '1v1学员数', '1V1在读', '1v1在读', '1V1在读学员数', '1V1在读单科', '1V1在读单科数', '1v1在读单科数', '1对1学员数', '1对1在读', '1V1人数', '1v1人数', '1V1在读人数'],
+    v6Students: ['1V6学员数', '1v6学员数', '1V6在读', '1v6在读', '1V6在读学员数', '1V6在读单科', '1V6在读单科数', '1v6在读单科数', '1对6学员数', '1V6人数', '1v6人数', '1V6在读人数'],
+    monthSessions: ['月度课次', '月课次', '本月课次', '当月课次', '月度课时', '月课时', '课次'],
+    weekSeq: ['周次', '参考周次', '当月周次', '当月周数', '月周数', '周数'],
+    v1Sessions: ['月度1V1课次', '1V1月度课次', '1V1课次', '1v1课次', '月1V1课次', '1V1月课次', '1V1课时'],
+    stopCount: ['1V1停课人数', '1V1停课', '停课人数', '1v1停课人数', '停课'],
+    gradCount: ['1V1结课人数', '1V1结课', '结课人数', '1v1结课人数', '结课'],
+    refundCount: ['1V1退费人数', '1V1退费', '退费人数', '1v1退费人数', '退费'],
+    renewCount: ['1V1续费人数', '1V1续费', '续费人数', '1v1续费人数', '续费'],
+    examScore: ['专业考分数', '专业考分', '专业分', '专业考成绩', '专业考试分数'],
+    examRank: ['专业考排名', '专业考名次', '专业排名', '专业名次', '排名'],
+    examResult: ['优秀/及格', '优秀及格', '优秀', '及格', '考试结果', '考核结果'],
+    progressRate: ['进步率', '成绩进步率', '进步幅度'],
+    evalSubjects: ['参评单科数', '参评单科', '参评科数', '单科数'],
+  };
+  const TKPI_ALIAS_IDX = {};
+  Object.keys(TKPI_HEADER_ALIAS).forEach(k => TKPI_HEADER_ALIAS[k].forEach(a => { TKPI_ALIAS_IDX[tkpiNorm(a)] = k; }));
+
+  function tkpiNorm(s) {
+    return String(s == null ? '' : s).trim().toLowerCase().replace(/[\s（）()【】\[\]：:]/g, '');
+  }
+  function mapTKpiHeader(row) {
+    const map = {};
+    if (!row) return map;
+    row.forEach((v, c) => {
+      if (v == null || String(v).trim() === '') return;
+      const k = TKPI_ALIAS_IDX[tkpiNorm(v)];
+      if (k && map[k] == null) map[k] = c;
+    });
+    return map;
+  }
+  function tkpiParseMonth(v, defYear) {
+    if (v == null || v === '') return null;
+    if (v instanceof Date) return { y: v.getFullYear(), mo: v.getMonth() + 1 };
+    if (typeof v === 'number' && isFinite(v)) {
+      if (v >= 200001 && v <= 210012) return { y: Math.floor(v / 100), mo: v % 100 };
+      if (v >= 1 && v <= 12) return { y: defYear, mo: v };
+      return null;
     }
+    const s = String(v).trim();
+    let m = s.match(/(\d{4})[年.\-/](\d{1,2})月?/);
+    if (m) return { y: +m[1], mo: +m[2] };
+    m = s.match(/^(\d{4})(\d{2})月?$/);
+    if (m) return { y: +m[1], mo: +m[2] };
+    m = s.match(/^(\d{1,2})月?$/);
+    if (m) return { y: defYear, mo: +m[1] };
+    return null;
+  }
+  function tkpiNum(v) {
+    if (v == null || v === '') return 0;
+    if (typeof v === 'number') return isFinite(v) ? v : null;
+    const n = parseFloat(String(v).trim().replace(/,/g, ''));
+    return isFinite(n) ? n : null;
+  }
+  function tkpiRatio(v) {
+    if (v == null || v === '') return null;
+    const isPctStr = typeof v === 'string' && v.trim().endsWith('%');
+    const n = (typeof v === 'number') ? v : parseFloat(String(v).trim().replace(/,/g, '').replace(/%$/, ''));
+    if (!isFinite(n)) return null;
+    if (isPctStr || Math.abs(n) > 1) return n / 100; // 35% / 35 → 0.35；0.35 → 0.35
+    return n;
+  }
+  // 周次解析：Excel 列 > 月度数据源当月周数 > 默认 4（调用方标注）
+  function tkpiWeekOfMonth(y, m, excelVal) {
+    if (excelVal != null && excelVal !== '') {
+      const n = tkpiNum(excelVal);
+      if (n != null && n > 0) return n;
+    }
+    const rec = getMonthlyRecords().find(r => r.year === y && r.month === m);
+    const w = rec && rec.values ? (rec.values.totalWeeksOfMonth || rec.values.weekSeq) : null;
+    return (w != null && w > 0) ? w : null;
+  }
+  // 半年度下拉选项（按 年份/半年 倒序）
+  function tkpiHalfOptions(recs) {
+    const set = new Set();
+    recs.forEach(r => set.add(AGG.tkpiHalfLabel(r.year, r.month).label));
+    return [...set].map(label => {
+      const m = label.match(/^(\d{4})(上半年|下半年)$/);
+      return { label, year: +m[1], half: m[2] === '上半年' ? 1 : 2 };
+    }).sort((a, b) => (b.year - a.year) || (b.half - a.half));
+  }
+  // 迁移：旧版「周度教师 KPI」直接替换清空（一次性）
+  function migrateOldKpi() {
+    const FLAG = 'ca_tkpi_migrated_v20260826c';
+    try { if (localStorage.getItem(FLAG)) return; } catch (e) { return; }
+    const old = STORE.list('kpi');
+    if (old.length) {
+      old.forEach(r => STORE.remove('kpi', r.year, r.month, r.week, r.dimension));
+      toast('已清空旧版「周度教师 KPI」' + old.length + ' 条，由新版月度台账接管');
+    }
+    try { localStorage.setItem(FLAG, '1'); } catch (e) {}
+  }
+  function clearTKpi() {
+    const recs = STORE.list(TKPI_STREAM);
+    if (!recs.length) { toast('暂无数据'); return; }
+    if (!confirm('确定清空全部教师 KPI 台账（' + recs.length + ' 条）？此操作不可撤销，建议先「导出台账」备份。')) return;
+    recs.forEach(r => STORE.remove(TKPI_STREAM, r.year, r.month, 0, r.dimension));
+    toast('已清空全部教师 KPI');
+    renderKpi();
+  }
+  function tkpiCurrentFiltered() {
+    const recs = STORE.list(TKPI_STREAM);
+    const teacher = $('#tkpi_teacher') ? $('#tkpi_teacher').value : '';
+    const half = $('#tkpi_half') ? $('#tkpi_half').value : '';
+    let list = recs;
+    if (teacher) list = list.filter(r => r.dimension === teacher);
+    if (half) list = list.filter(r => AGG.tkpiHalfLabel(r.year, r.month).label === half);
+    return list;
+  }
+
+  // —— 导入（横表 Excel/CSV）——
+  function importTKpi(file) {
+    const reader = new FileReader();
+    reader.onload = e => {
+      try {
+        const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+        const ws = wb.Sheets[wb.SheetNames[0]];
+        const matrix = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: true });
+        let headIdx = -1, colMap = null;
+        for (let i = 0; i < Math.min(matrix.length, 60); i++) {
+          const mm = mapTKpiHeader(matrix[i]);
+          if (Object.keys(mm).length >= 3) { headIdx = i; colMap = mm; break; }
+        }
+        if (headIdx < 0) {
+          showTKpiResult({ ok: 0, upd: 0, fail: 0, weekFallback: 0, dupFile: 0, errors: ['未识别到表头：请确认首行含「教师 / 1V1学员数 / 月度课次」等列名，或用「下载导入模板」生成的文件。'] });
+          return;
+        }
+        const existing = new Set(STORE.list(TKPI_STREAM).map(r => r.year + '-' + r.month + '-' + r.dimension));
+        const seen = new Set();
+        let ok = 0, upd = 0, fail = 0, weekFallback = 0, dupFile = 0;
+        const errors = [];
+        const defYear = new Date().getFullYear();
+        for (let i = headIdx + 1; i < matrix.length; i++) {
+          const row = matrix[i];
+          if (!row || !row.some(c => c != null && String(c).trim() !== '')) continue;
+          const cell = c => (c != null ? row[c] : null);
+          const teacher = cell(colMap.teacher);
+          if (teacher == null || String(teacher).trim() === '') continue; // 空行 / 无教师行（模板公式行）跳过
+          const tname = String(teacher).trim();
+          const pm = tkpiParseMonth(cell(colMap.month), defYear);
+          if (!pm) { fail++; errors.push('第' + (i + 1) + '行「' + tname + '」：月份无法识别（' + (cell(colMap.month) == null ? '空' : JSON.stringify(cell(colMap.month))) + '），请用 2026-03 格式'); continue; }
+          if (pm.mo < 1 || pm.mo > 12) { fail++; errors.push('第' + (i + 1) + '行「' + tname + '」：月份 ' + pm.mo + ' 超出 1-12'); continue; }
+          const vals = {};
+          vals.subjectGroup = cell(colMap.subjectGroup) != null ? String(cell(colMap.subjectGroup)).trim() : '';
+          const numCols = ['v1Students', 'v6Students', 'monthSessions', 'v1Sessions', 'stopCount', 'gradCount', 'refundCount', 'renewCount', 'evalSubjects'];
+          let bad = null;
+          numCols.forEach(k => {
+            if (bad) return;
+            const v = tkpiNum(cell(colMap[k]));
+            if (v == null) { bad = '第' + (i + 1) + '行「' + tname + '」：' + (TKPI_HEADER_ALIAS[k] ? TKPI_HEADER_ALIAS[k][0] : k) + ' 不是有效数字（' + JSON.stringify(cell(colMap[k])) + '）'; return; }
+            vals[k] = v;
+          });
+          if (bad) { fail++; errors.push(bad); continue; }
+          const wk = tkpiWeekOfMonth(pm.y, pm.mo, colMap.weekSeq != null ? cell(colMap.weekSeq) : null);
+          vals.weekSeq = wk || 4;
+          if (!wk) weekFallback++;
+          const q = (k, conv) => {
+            const v = cell(colMap[k]);
+            if (v == null || String(v).trim() === '') return null;
+            return conv ? conv(v) : String(v).trim();
+          };
+          vals.examScore = q('examScore', tkpiNum);
+          vals.examRank = q('examRank', tkpiNum);
+          vals.examResult = q('examResult', null);
+          vals.progressRate = q('progressRate', tkpiRatio);
+          const key = pm.y + '-' + pm.mo + '-' + tname;
+          if (seen.has(key)) dupFile++; else seen.add(key);
+          const isNew = !existing.has(key);
+          STORE.upsert({ stream: TKPI_STREAM, year: pm.y, month: pm.mo, week: 0, dimension: tname, values: vals, importedAt: Date.now() });
+          if (isNew) ok++; else upd++;
+        }
+        showTKpiResult({ ok, upd, fail, weekFallback, dupFile, errors });
+        renderKpi();
+      } catch (err) {
+        showTKpiResult({ ok: 0, upd: 0, fail: 0, weekFallback: 0, dupFile: 0, errors: ['文件解析失败：' + err.message] });
+      }
+    };
+    reader.readAsArrayBuffer(file);
+  }
+  function showTKpiResult(res) {
+    const ov = document.createElement('div');
+    ov.className = 'modal-overlay show';
+    const parts = ['<span class="ok">新增 ' + res.ok + '</span>', '<span class="upd">更新 ' + res.upd + '</span>'];
+    if (res.fail) parts.push('<span class="bad">失败 ' + res.fail + '</span>');
+    let html = '<div class="modal"><div class="modal-head"><span>教师 KPI 导入结果</span><button class="modal-x" id="tkpiResX">×</button></div><div class="modal-body">';
+    html += '<div class="import-summary">' + parts.join('') + '</div>';
+    if (res.weekFallback) html += '<div class="import-note">' + res.weekFallback + ' 行未匹配到「月度数据源」当月周数，已按默认 4 周计算参考课次。</div>';
+    if (res.dupFile) html += '<div class="import-note">' + res.dupFile + ' 行与文件内前面的行重复（教师+月份），以最后一行覆盖。</div>';
+    if (res.errors.length) html += '<div class="import-err-title">失败明细：</div><div class="import-err-list">' + res.errors.map(x => '<div class="import-err-item">' + esc(x) + '</div>').join('') + '</div>';
+    else html += '<div class="import-note ok-note">全部通过校验。</div>';
+    html += '</div><div class="modal-foot"><button class="btn primary" id="tkpiResOk">知道了</button></div></div>';
+    ov.innerHTML = html;
+    document.body.appendChild(ov);
+    const close = () => ov.remove();
+    $('#tkpiResX', ov).addEventListener('click', close);
+    $('#tkpiResOk', ov).addEventListener('click', close);
+    ov.addEventListener('click', e => { if (e.target === ov) close(); });
+  }
+
+  // —— 模板下载 / 台账导出 ——
+  function downloadTKpiTemplate() {
+    const header = ['教师', '月份', '学科组', '1V1学员数', '1V6学员数', '总学员数', '月度课次', '周次', '参考课次', '月饱和度', '月度1V1课次', '月度周平均', '1V1停课人数', '1V1结课人数', '1V1退费人数', '1V1续费人数', '专业考分数', '专业考排名', '优秀/及格', '进步率', '参评单科数'];
+    // 第2行为公式示例行（无教师名，导入时自动跳过）：派生列填写数据后自动计算
+    const formulaRow = ['', '', '', '', '', '=D2+E2', '', '', '=IF(H2="","",H2*16)', '=IF(I2="","",G2/I2)', '', '=IF(OR(D2="",H2="",K2=""),"",K2*3/D2/H2)', '', '', '', '', '', '', '', '', ''];
+    const note = [
+      ['1. 每行 = 一位教师 × 一个月；「月份」建议 2026-03 格式（也支持 2026/3、2026年3月、202603、3月）。'],
+      ['2. 第2行为公式示例行（无教师名，导入时自动跳过）：填好 B~E/G/H/K 列后，总学员数 / 参考课次 / 月饱和度 / 月度周平均 自动计算；导入时系统按同一口径重算。'],
+      ['3. 「周次」可留空：导入时自动取「月度数据源」当月周数；该月无月度数据时默认按 4 周计算。'],
+      ['4. 季度字段：专业考分数 / 专业考排名 / 优秀及格 / 参评单科数 仅 3、6、9、12 月填写；进步率 仅 1、4、6、11 月填写（35% 或 0.35 均可）。'],
+      ['5. 重复导入同一「教师 + 月份」= 覆盖更新；同一文件内重复行以最后一行覆盖。'],
+    ];
+    exportSheets('教师KPI导入模板.xlsx', [
+      { name: '教师KPI台账', header, rows: [formulaRow] },
+      { name: '填写说明', header: ['说明'], rows: note },
+    ]);
+  }
+  function exportTKpi(recs) {
+    if (!recs.length) { toast('暂无数据可导出'); return; }
+    const header = ['年', '月', '教师', '学科组', '总学员数', '1V1学员数', '1V6学员数', '月度课次', '周次', '参考课次', '月饱和度(%)', '月度1V1课次', '月度周平均', '1V1停课人数', '1V1结课人数', '1V1退费人数', '1V1续费人数', '专业考分数', '专业考排名', '优秀/及格', '进步率(%)', '参评单科数'];
+    const rows = recs.slice().sort((a, b) => (a.year - b.year) || (a.month - b.month) || a.dimension.localeCompare(b.dimension, 'zh-CN')).map(r => {
+      const d = AGG.tkpiMonthDerived(r.values), v = r.values;
+      return [r.year, r.month, r.dimension, v.subjectGroup || '', d.totalStudents, v.v1Students || 0, v.v6Students || 0, v.monthSessions || 0, v.weekSeq || '', d.refSessions,
+        d.saturation == null ? '' : +(d.saturation * 100).toFixed(2), v.v1Sessions || 0, d.weekAvg == null ? '' : +d.weekAvg.toFixed(2),
+        v.stopCount || 0, v.gradCount || 0, v.refundCount || 0, v.renewCount || 0,
+        v.examScore == null ? '' : v.examScore, v.examRank == null ? '' : v.examRank, v.examResult == null ? '' : v.examResult,
+        v.progressRate == null ? '' : +(v.progressRate * 100).toFixed(2), v.evalSubjects || 0];
+    });
+    exportSheets('教师KPI台账.xlsx', [{ name: '教师KPI台账', header, rows }]);
+  }
+
+  // —— 页面渲染 ——
+  function renderKpi() {
+    migrateOldKpi();
+    const recs = STORE.list(TKPI_STREAM);
+    const teachers = [...new Set(recs.map(r => r.dimension))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const halfOpts = tkpiHalfOptions(recs);
+
+    let html = '<div class="panel"><div class="panel-title">教师 KPI · 月度台账（教师个人维度）</div>';
+    html += '<div class="panel-desc">每行 = 一位教师 × 一个月（横表导入）。总学员数 = 1V1学员数 + 1V6学员数；参考课次 = 周次 × 16；月饱和度 = 月度课次 ÷ 参考课次；月度周平均 = 月度1V1课次 × 3 ÷ 1V1学员数 ÷ 周次。专业考分数/排名/优秀及格/参评单科数 仅 3·6·9·12 月、进步率 仅 1·4·6·11 月填写。</div>';
+    html += '<div class="row" style="margin-bottom:14px">';
+    html += '<button class="btn primary" id="tkpi_import_btn">⬆ 导入 Excel/CSV</button>';
+    html += '<button class="btn" id="tkpi_tpl_btn">⬇ 下载导入模板</button>';
+    html += '<button class="btn" id="tkpi_export_btn">⬇ 导出台账（当前筛选）</button>';
+    html += '<button class="btn ghost" id="tkpi_clear_btn">清空全部</button>';
+    html += '<input type="file" id="tkpi_file" accept=".xlsx,.xls,.csv" hidden />';
+    html += '</div>';
+    html += '<div class="row" style="margin-bottom:4px">';
+    html += '<div class="field"><label>教师</label><select id="tkpi_teacher"><option value="">全部教师</option>' + teachers.map(t => '<option>' + esc(t) + '</option>').join('') + '</select></div>';
+    html += '<div class="field"><label>半年度</label><select id="tkpi_half"><option value="">全部月份</option>' + halfOpts.map(h => '<option>' + h.label + '</option>').join('') + '</select></div>';
+    html += '</div>';
+    html += '<div id="tkpi_chart_wrap"></div>';
+    html += '<div id="tkpi_monthly_body"></div>';
     html += '</div>';
 
-    // 半年度
-    const years = AGG.yearOptions(recs);
-    const yr = years.length ? years[years.length - 1] : new Date().getFullYear();
-    const half = Math.floor((new Date().getMonth()) / 6) + 1;
-    const hy = AGG.kpiHalfYear(recs, yr, half);
-    html += '<div class="panel"><div class="panel-title">半年度汇总与等级（' + yr + ' 年 H' + half + '）</div>';
-    html += '<div class="panel-desc">半年度 = 月数据累计 + 半年进步率（取自季度考，留空的取最近录入）+ 饱和度；级别按 ZD-级别评定表（专业分默认0，可在半年复盘补）。</div>';
-    if (!hy.length) html += '<div class="empty">暂无半年度数据（需先积累周报）。</div>';
+    html += '<div class="panel"><div class="panel-title">半年度汇总（上半年 = 3-8月；下半年 = 9-2月）</div>';
+    html += '<div class="panel-desc">总/1V1/1V6学员数 = 半年内最新月份值；课次/参考课次/结课/退费/续费 = 累计；饱和度 = 累计课次 ÷ 累计参考课次；周平均/停课人数 = 各月平均；优秀/及格 = 两次专业考结果直接体现；进步率 = 两次进步率平均。半年内无数据的月份按 0 计。</div>';
+    html += '<div class="row" style="margin-bottom:4px"><div class="field"><label>选择半年度</label><select id="tkpi_half_sel">' + halfOpts.map(h => '<option>' + h.label + '</option>').join('') + '</select></div></div>';
+    html += '<div id="tkpi_half_body"></div></div>';
+
+    $('#content').innerHTML = html;
+    $('#tkpi_import_btn').addEventListener('click', () => $('#tkpi_file').click());
+    $('#tkpi_file').addEventListener('change', e => { const f = e.target.files[0]; if (f) importTKpi(f); e.target.value = ''; });
+    $('#tkpi_tpl_btn').addEventListener('click', downloadTKpiTemplate);
+    $('#tkpi_export_btn').addEventListener('click', () => exportTKpi(tkpiCurrentFiltered()));
+    $('#tkpi_clear_btn').addEventListener('click', clearTKpi);
+    $('#tkpi_teacher').addEventListener('change', renderTKpiMonthly);
+    $('#tkpi_half').addEventListener('change', renderTKpiMonthly);
+    $('#tkpi_half_sel').addEventListener('change', renderTKpiHalfBody);
+    renderTKpiMonthly();
+    renderTKpiHalfBody();
+  }
+
+  // 月度台账（含单教师趋势图）
+  function renderTKpiMonthly() {
+    const teacher = $('#tkpi_teacher').value;
+    const half = $('#tkpi_half').value;
+    const list = tkpiCurrentFiltered().map(r => ({ r, d: AGG.tkpiMonthDerived(r.values) }));
+    list.sort((a, b) => (a.r.year - b.r.year) || (a.r.month - b.r.month) || a.r.dimension.localeCompare(b.r.dimension, 'zh-CN'));
+
+    const wrap = $('#tkpi_chart_wrap');
+    if (teacher && list.length >= 2) {
+      wrap.innerHTML = '<div class="section-h">' + esc(teacher) + ' · 月度趋势</div><div class="chart-box" style="height:230px"><canvas id="tkpiChart"></canvas></div>';
+      const labels = list.map(x => x.r.year + '/' + x.r.month);
+      const mk = (label, data, color) => ({ label, data: data.map(v => v == null ? null : +(+v).toFixed(2)), borderColor: color, backgroundColor: 'transparent', tension: .3, fill: false, pointRadius: 3, pointBackgroundColor: color });
+      drawLine('tkpiChart', labels, [
+        mk('月度课次', list.map(x => x.r.values.monthSessions || 0), '#4F46E5'),
+        mk('月度1V1课次', list.map(x => x.r.values.v1Sessions || 0), '#0ea5e9'),
+        mk('月饱和度%', list.map(x => x.d.saturation == null ? null : x.d.saturation * 100), '#16a34a'),
+        mk('1V1学员数', list.map(x => x.r.values.v1Students || 0), '#d97706'),
+      ], '');
+    } else wrap.innerHTML = '';
+
+    let html = '';
+    if (!list.length) html += '<div class="empty">暂无数据。点击「导入 Excel/CSV」批量导入，或先「下载导入模板」按格式填写。</div>';
     else {
-      html += '<div class="table-wrap"><table><thead><tr><th>教师</th><th>学科组</th><th class="num">半年课时</th><th class="num">半年饱和度</th><th class="num">进步率</th><th class="num">总分</th><th>等级</th></tr></thead><tbody>';
-      hy.sort((a, b) => b.level.total - a.level.total).forEach(r => {
-        const lv = r.level.level;
-        const lvColor = { A: 'ok', B: 'me', C: 'warn', D: 'warn' }[lv];
-        html += '<tr><td>' + r.dimension + '</td><td>' + (r.values.subjectGroup || '—') + '</td>' +
-          '<td class="num">' + fmt(r.totalHours) + '</td><td class="num">' + pct(r.values.saturation) + '</td>' +
-          '<td class="num">' + pct(r.values.progressRate) + '</td><td class="num">' + fmt(r.level.total, 1) + '</td>' +
-          '<td><span class="tag ' + lvColor + '">' + lv + '级</span></td></tr>';
+      html += '<div class="table-wrap"><table><thead><tr><th>年</th><th>月</th><th>教师</th><th>学科组</th><th class="num">总学员数</th><th class="num">1V1学员数</th><th class="num">1V6学员数</th><th class="num">月度课次</th><th class="num">参考课次</th><th class="num">月饱和度</th><th class="num">月度1V1课次</th><th class="num">月度周平均</th><th class="num">1V1停课</th><th class="num">1V1结课</th><th class="num">1V1退费</th><th class="num">1V1续费</th><th class="num">专业考分数</th><th class="num">专业考排名</th><th>优秀/及格</th><th class="num">进步率</th><th class="num">参评单科数</th><th></th></tr></thead><tbody>';
+      list.forEach(x => {
+        const r = x.r, v = r.values, d = x.d;
+        html += '<tr><td class="num">' + r.year + '</td><td class="num">' + r.month + '</td><td>' + esc(r.dimension) + '</td><td>' + esc(v.subjectGroup || '—') + '</td>' +
+          '<td class="num">' + d.totalStudents + '</td><td class="num">' + fmt(v.v1Students) + '</td><td class="num">' + fmt(v.v6Students) + '</td>' +
+          '<td class="num">' + fmt(v.monthSessions) + '</td><td class="num">' + d.refSessions + '</td><td class="num">' + pct(d.saturation) + '</td>' +
+          '<td class="num">' + fmt(v.v1Sessions) + '</td><td class="num">' + fmt(d.weekAvg, 2) + '</td>' +
+          '<td class="num">' + fmt(v.stopCount) + '</td><td class="num">' + fmt(v.gradCount) + '</td><td class="num">' + fmt(v.refundCount) + '</td><td class="num">' + fmt(v.renewCount) + '</td>' +
+          '<td class="num">' + (v.examScore == null ? '—' : fmt(v.examScore)) + '</td><td class="num">' + (v.examRank == null ? '—' : fmt(v.examRank)) + '</td><td>' + esc(v.examResult || '—') + '</td>' +
+          '<td class="num">' + pct(v.progressRate) + '</td><td class="num">' + (v.evalSubjects == null ? '—' : fmt(v.evalSubjects)) + '</td>' +
+          '<td><button class="btn xs ghost" data-del="' + JSON.stringify([r.year, r.month, r.dimension]).replace(/"/g, '&quot;') + '">删</button></td></tr>';
       });
       html += '</tbody></table></div>';
     }
-    html += '</div>';
-    $('#content').innerHTML = html;
-    wireUpload('kpi');
+    $('#tkpi_monthly_body').innerHTML = html;
+    $all('#tkpi_monthly_body [data-del]').forEach(btn => btn.addEventListener('click', () => {
+      const [y, m, name] = JSON.parse(btn.dataset.del);
+      if (!confirm('删除 ' + name + ' ' + y + '-' + m + ' 这条记录？')) return;
+      STORE.remove(TKPI_STREAM, +y, +m, 0, name);
+      toast('已删除');
+      renderKpi();
+    }));
+  }
+
+  // 半年度汇总表
+  function renderTKpiHalfBody() {
+    const recs = STORE.list(TKPI_STREAM);
+    const roster = [...new Set(recs.map(r => r.dimension))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
+    const hy = AGG.tkpiHalfYear(recs);
+    const opts = tkpiHalfOptions(recs);
+    const sel = $('#tkpi_half_sel');
+    if (!opts.length) { $('#tkpi_half_body').innerHTML = '<div class="empty">暂无数据，导入后自动生成半年度汇总。</div>'; return; }
+    if (!sel.value || !opts.some(o => o.label === sel.value)) sel.value = opts[0].label;
+    const cur = sel.value;
+    const byKey = {};
+    hy.forEach(h => { byKey[h.label + '|' + h.dimension] = h; });
+    const cols = ['教师', '学科组', '总学员数', '1V1学员数', '1V6学员数', '累计课次', '累计参考课次', '饱和度', '周平均', '1V1停课(均)', '结课(累)', '退费(累)', '续费(累)', '优秀/及格(两次)', '进步率(均)'];
+    let html = '<div class="table-wrap"><table><thead><tr><th>' + esc(cur) + '</th>' + cols.slice(1).map(t => '<th class="num">' + t + '</th>').join('') + '</tr></thead><tbody>';
+    roster.forEach(name => {
+      const h = byKey[cur + '|' + name];
+      const v = h ? h.values : { totalStudents: 0, v1Students: 0, v6Students: 0, sessions: 0, refSessions: 0, saturation: null, weekAvg: 0, stopCount: 0, gradCount: 0, refundCount: 0, renewCount: 0, examResults: [], progressRate: 0, subjectGroup: '' };
+      const examTxt = v.examResults.length ? v.examResults.map(x => x.m + '月 ' + x.r).join(' ｜ ') : '—';
+      html += '<tr><td>' + esc(name) + '</td><td>' + esc(v.subjectGroup || '—') + '</td>' +
+        '<td class="num">' + fmt(v.totalStudents) + '</td><td class="num">' + fmt(v.v1Students) + '</td><td class="num">' + fmt(v.v6Students) + '</td>' +
+        '<td class="num">' + fmt(v.sessions) + '</td><td class="num">' + fmt(v.refSessions) + '</td><td class="num">' + pct(v.saturation == null ? 0 : v.saturation) + '</td>' +
+        '<td class="num">' + fmt(v.weekAvg, 2) + '</td><td class="num">' + fmt(v.stopCount, 1) + '</td>' +
+        '<td class="num">' + fmt(v.gradCount) + '</td><td class="num">' + fmt(v.refundCount) + '</td><td class="num">' + fmt(v.renewCount) + '</td>' +
+        '<td>' + examTxt + '</td><td class="num">' + pct(v.progressRate) + '</td></tr>';
+    });
+    html += '</tbody></table></div>';
+    $('#tkpi_half_body').innerHTML = html;
   }
 
   // —— 五项满意度（核心看板子页签）——
