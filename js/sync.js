@@ -14,13 +14,16 @@
   var client = null, session = null, channel = null, pushTimer = null;
   var applyingRemote = false;
   var status = disabled ? 'disabled' : 'signedout';
+  var statusMsg = '';
   var statusListeners = [];
 
-  function setStatus(s, msg) { status = s; statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} }); }
+  function setStatus(s, msg) { status = s; statusMsg = msg || ''; statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} }); }
   function ensureClient() {
     if (disabled || client) return client;
     if (global.supabase && global.supabase.createClient) {
       client = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    } else {
+      console.error('[sync] Supabase JS SDK 未加载，请检查网络、CDN 可访问性或广告拦截插件');
     }
     return client;
   }
@@ -49,11 +52,17 @@
     return false;
   }
   async function signIn(email) {
-    var c = ensureClient(); if (!c) return;
+    var c = ensureClient();
+    if (!c) { setStatus('error', 'Supabase 客户端未加载，请检查网络或刷新页面'); return; }
     setStatus('signingin');
-    var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
-    if (r.error) { setStatus('error', r.error.message); return; }
-    setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
+    try {
+      var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
+      if (r.error) { setStatus('error', r.error.message); return; }
+      setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
+    } catch (e) {
+      console.error('[sync] signIn', e);
+      setStatus('error', '发送失败：' + (e.message || '网络/配置错误'));
+    }
   }
   async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
 
@@ -182,7 +191,8 @@
       return;
     }
     if (status === 'error') {
-      w.innerHTML = '<div class="sw-box"><span class="sw-dot red"></span>同步出错，请刷新重试<a id="sync-retry" class="sw-link">重试</a></div>';
+      var errMsg = statusMsg || '同步出错，请刷新重试';
+      w.innerHTML = '<div class="sw-box"><span class="sw-dot red"></span>' + errMsg + '<a id="sync-retry" class="sw-link">重试</a></div>';
       el('sync-retry').onclick = function () { start(); };
       return;
     }
