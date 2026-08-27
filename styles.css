@@ -372,3 +372,22 @@ tr.winner td:first-child { font-weight: 700; color: var(--indigo); }
 .wbar > i { display: block; height: 100%; background: var(--indigo); border-radius: 3px; }
 .total-line { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 13px 16px; background: var(--indigo-soft); border: 1px solid #c7d2fe; border-radius: var(--radius); margin-top: 12px; font-size: 13.5px; }
 .total-line .big { font-size: 17px; font-weight: 700; color: var(--indigo); font-family: var(--mono); }
+
+/* ===== 云端同步小组件（sync.js） ===== */
+.sync-widget{position:fixed;right:14px;bottom:14px;z-index:9999;font:13px/1.4 Inter,system-ui,sans-serif}
+.sw-box{background:#fff;border:1px solid #e4e4e7;border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,.10);padding:10px 12px;display:flex;align-items:center;gap:8px;max-width:330px;flex-wrap:wrap}
+.sw-dot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+.sw-dot.green{background:#22c55e}.sw-dot.grey{background:#a1a1aa}.sw-dot.blue{background:#4F46E5}.sw-dot.red{background:#ef4444}
+.sw-row{display:flex;gap:6px;flex:1;min-width:180px}
+.sw-input{border:1px solid #d4d4d8;border-radius:7px;padding:6px 8px;font-size:13px;flex:1;outline:none;min-width:0}
+.sw-input:focus{border-color:#4F46E5}
+.sw-btn{background:#4F46E5;color:#fff;border:0;border-radius:7px;padding:6px 10px;font-size:13px;cursor:pointer}
+.sw-btn.small{padding:4px 8px;font-size:12px}
+.sw-btn:hover{filter:brightness(1.05)}
+.sw-link{color:#4F46E5;cursor:pointer;font-size:12px;text-decoration:underline;background:none;border:0;padding:0}
+.sw-tip{font-size:11px;color:#71717a;margin-top:6px;width:100%}
+.sw-user{font-size:12px;color:#27272a}
+.sw-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:10000;display:flex;align-items:center;justify-content:center}
+.sw-modal{background:#fff;border-radius:12px;max-width:680px;width:92%;max-height:82vh;overflow:auto;padding:18px 20px;box-shadow:0 20px 60px rgba(0,0,0,.25);position:relative}
+.sw-modal h3{margin:0 0 10px;font-size:16px}
+.sw-close{position:absolute;top:12px;right:14px;cursor:pointer;color:#71717a;border:0;background:none;font-size:20px;line-height:1}
