@@ -52,22 +52,32 @@
     return false;
   }
   var signingIn = false;
+  var lastOtpSentAt = 0;
   async function signIn(email) {
-    if (signingIn) return; // 防重复点击：避免短期内反复请求 OTP 触发 429
+    if (signingIn) return; // 请求返回前禁止再次点击
+    var now = Date.now();
+    if (now - lastOtpSentAt < 60000) { // 本地 60 秒冷却：避免触发 Supabase 免费档 429
+      var waitSec = Math.ceil((60000 - (now - lastOtpSentAt)) / 1000);
+      setStatus('error', '登录链接已发送，请检查邮箱；或等待 ' + waitSec + ' 秒后再试');
+      renderWidget();
+      return;
+    }
     var c = ensureClient();
     if (!c) { setStatus('error', 'Supabase 客户端未加载，请检查网络或刷新页面'); renderWidget(); return; }
     signingIn = true;
+    lastOtpSentAt = now; // 只要尝试发送，就记一次时间
     setStatus('signingin');
     try {
       var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
       signingIn = false;
       if (r.error) {
-        // 429 是免费档发送频次限制：提示用户稍后再试，而非反复重试
+        // 429 是免费档发送频次限制；服务端冷却时，本地也进入冷却，提示用户稍后再试
         if (/429/.test('' + (r.error.message || '')) || (r.error.status === 429)) {
-          setStatus('error', '发送太频繁，请等待 30 秒后再试');
+          setStatus('error', '发送太频繁，请等待 1–2 分钟后再试');
         } else {
           setStatus('error', r.error.message);
         }
+        renderWidget();
         return;
       }
       setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
