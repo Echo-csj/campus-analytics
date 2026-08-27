@@ -56,41 +56,30 @@
     return false;
   }
   var signingIn = false;
-  var lastOtpSentAt = 0;
-  async function signIn(email) {
-    if (signingIn) return; // 请求返回前禁止再次点击
-    var now = Date.now();
-    if (now - lastOtpSentAt < 120000) { // 本地 2 分钟冷却：对齐 Supabase 免费档 OTP 限流窗口
-      var waitSec = Math.ceil((120000 - (now - lastOtpSentAt)) / 1000);
-      setStatus('error', '登录链接已发送，请检查邮箱；或等待 ' + waitSec + ' 秒后再试');
-      renderWidget();
-      return;
-    }
+  async function signIn(email, password) {
+    if (signingIn) return;
     var c = ensureClient();
     if (!c) { setStatus('error', 'Supabase 客户端未加载，请检查网络或刷新页面'); renderWidget(); return; }
     signingIn = true;
-    lastOtpSentAt = now; // 只要尝试发送，就记一次时间
     setStatus('signingin');
     try {
-      var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
+      var r = await c.auth.signInWithPassword({ email: email, password: password });
       signingIn = false;
       if (r.error) {
-        // 429 是免费档发送频次限制；服务端冷却时，本地也进入冷却，提示用户稍后再试
-        if (/429/.test('' + (r.error.message || '')) || (r.error.status === 429)) {
-          lastOtpSentAt = Date.now(); // 429 后从报错时刻重新冷却 2 分钟
-          setStatus('error', '发送太频繁，请等待 2 分钟后再试');
-        } else {
-          setStatus('error', r.error.message);
-        }
+        setStatus('error', r.error.message || '登录失败');
         renderWidget();
         return;
       }
-      setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
+      session = r.data.session;
+      setStatus('ok');
+      wrapWrites();
+      await applyRemote();
+      subscribeRealtime();
       renderWidget();
     } catch (e) {
       signingIn = false;
       console.error('[sync] signIn', e);
-      setStatus('error', '发送失败：' + (e.message || '网络/配置错误'));
+      setStatus('error', '登录失败：' + (e.message || '网络/配置错误'));
       renderWidget();
     }
   }
@@ -210,18 +199,19 @@
     }
     if (status === 'signedout') {
       w.innerHTML = '<div class="sw-box"><span class="sw-dot grey"></span>' +
-        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱登录以同步" class="sw-input"/>' +
+        '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱" class="sw-input"/>' +
+        '<input id="sync-pass" type="password" placeholder="密码" class="sw-input"/>' +
         '<button id="sync-login" class="sw-btn">登录</button></div>' +
         '<div class="sw-tip">开启后数据可在多设备同步（本机仍保留备份）</div></div>';
-      el('sync-login').onclick = function () { var e = el('sync-email').value.trim(); if (e) signIn(e); };
+      el('sync-login').onclick = function () {
+        var e = el('sync-email').value.trim();
+        var p = el('sync-pass').value;
+        if (e && p) signIn(e, p);
+      };
       return;
     }
     if (status === 'signingin') {
-      w.innerHTML = '<div class="sw-box"><span class="sw-dot blue"></span>正在发送登录链接…（请稍候，不要重复点击）</div>';
-      return;
-    }
-    if (status === 'checkemail') {
-      w.innerHTML = '<div class="sw-box"><span class="sw-dot blue"></span>已发登录链接，请查收邮箱并点击</div>';
+      w.innerHTML = '<div class="sw-box"><span class="sw-dot blue"></span>正在登录…（请稍候）</div>';
       return;
     }
     if (status === 'error') {
