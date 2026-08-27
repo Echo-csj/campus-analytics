@@ -51,17 +51,32 @@
     } catch (e) { console.warn('[sync]', e); }
     return false;
   }
+  var signingIn = false;
   async function signIn(email) {
+    if (signingIn) return; // 防重复点击：避免短期内反复请求 OTP 触发 429
     var c = ensureClient();
-    if (!c) { setStatus('error', 'Supabase 客户端未加载，请检查网络或刷新页面'); return; }
+    if (!c) { setStatus('error', 'Supabase 客户端未加载，请检查网络或刷新页面'); renderWidget(); return; }
+    signingIn = true;
     setStatus('signingin');
     try {
       var r = await c.auth.signInWithOtp({ email: email, options: { emailRedirectTo: location.origin + location.pathname } });
-      if (r.error) { setStatus('error', r.error.message); return; }
+      signingIn = false;
+      if (r.error) {
+        // 429 是免费档发送频次限制：提示用户稍后再试，而非反复重试
+        if (/429/.test('' + (r.error.message || '')) || (r.error.status === 429)) {
+          setStatus('error', '发送太频繁，请等待 30 秒后再试');
+        } else {
+          setStatus('error', r.error.message);
+        }
+        return;
+      }
       setStatus('checkemail', '已发送登录链接，请到邮箱点击完成登录');
+      renderWidget();
     } catch (e) {
+      signingIn = false;
       console.error('[sync] signIn', e);
       setStatus('error', '发送失败：' + (e.message || '网络/配置错误'));
+      renderWidget();
     }
   }
   async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
