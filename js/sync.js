@@ -17,7 +17,11 @@
   var statusMsg = '';
   var statusListeners = [];
 
-  function setStatus(s, msg) { status = s; statusMsg = msg || ''; statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} }); }
+  function setStatus(s, msg) {
+    status = s; statusMsg = msg || '';
+    try { renderWidget(); } catch (e) {}
+    statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} });
+  }
   function ensureClient() {
     if (disabled || client) return client;
     if (global.supabase && global.supabase.createClient) {
@@ -203,12 +207,16 @@
       w.innerHTML = '<div class="sw-box"><span class="sw-dot grey"></span>云端同步未启用（可选）</div>';
       return;
     }
-    if (status === 'signedout' || status === 'signingin') {
+    if (status === 'signedout') {
       w.innerHTML = '<div class="sw-box"><span class="sw-dot grey"></span>' +
         '<div class="sw-row"><input id="sync-email" type="email" placeholder="邮箱登录以同步" class="sw-input"/>' +
         '<button id="sync-login" class="sw-btn">登录</button></div>' +
         '<div class="sw-tip">开启后数据可在多设备同步（本机仍保留备份）</div></div>';
       el('sync-login').onclick = function () { var e = el('sync-email').value.trim(); if (e) signIn(e); };
+      return;
+    }
+    if (status === 'signingin') {
+      w.innerHTML = '<div class="sw-box"><span class="sw-dot blue"></span>正在发送登录链接…（请稍候，不要重复点击）</div>';
       return;
     }
     if (status === 'checkemail') {
