@@ -159,7 +159,10 @@
     all.forEach(function (r) {
       if (!byStream[r.stream] || score(r) > score(byStream[r.stream])) byStream[r.stream] = r;
     });
-    return { generatedAt: new Date().toISOString(), totalRecords: all.length, latestByStream: byStream };
+    // 历史月度（定稿月，按月份升序），供个人台计算环比/同比
+    var monthlyHistory = all.filter(function (r) { return r.stream === 'monthly' && r.year && r.month; })
+      .sort(function (a, b) { return (a.year - b.year) || (a.month - b.month); });
+    return { generatedAt: new Date().toISOString(), totalRecords: all.length, latestByStream: byStream, monthlyHistory: monthlyHistory };
   }
   async function pushSharedSnapshot() {
     if (!session) { toast('请先登录以启用云端'); return; }
