@@ -60,8 +60,8 @@
   async function signIn(email) {
     if (signingIn) return; // 请求返回前禁止再次点击
     var now = Date.now();
-    if (now - lastOtpSentAt < 60000) { // 本地 60 秒冷却：避免触发 Supabase 免费档 429
-      var waitSec = Math.ceil((60000 - (now - lastOtpSentAt)) / 1000);
+    if (now - lastOtpSentAt < 120000) { // 本地 2 分钟冷却：对齐 Supabase 免费档 OTP 限流窗口
+      var waitSec = Math.ceil((120000 - (now - lastOtpSentAt)) / 1000);
       setStatus('error', '登录链接已发送，请检查邮箱；或等待 ' + waitSec + ' 秒后再试');
       renderWidget();
       return;
@@ -77,7 +77,8 @@
       if (r.error) {
         // 429 是免费档发送频次限制；服务端冷却时，本地也进入冷却，提示用户稍后再试
         if (/429/.test('' + (r.error.message || '')) || (r.error.status === 429)) {
-          setStatus('error', '发送太频繁，请等待 1–2 分钟后再试');
+          lastOtpSentAt = Date.now(); // 429 后从报错时刻重新冷却 2 分钟
+          setStatus('error', '发送太频繁，请等待 2 分钟后再试');
         } else {
           setStatus('error', r.error.message);
         }
