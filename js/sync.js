@@ -38,6 +38,16 @@
   }
   function uid() { return session && session.user ? session.user.id : null; }
 
+  // 兜底清除 Supabase 本端持久化的会话令牌（键形如 sb-<ref>-auth-token），
+  // 保证即便 signOut 网络请求失败，刷新后也不会“复活”会话。
+  function clearAuthToken() {
+    try {
+      Object.keys(localStorage).forEach(function (k) {
+        if (/^sb-.*-auth-token$/.test(k)) localStorage.removeItem(k);
+      });
+    } catch (e) {}
+  }
+
   // ---- 认证 ----
   async function handleRedirect() {
     if (disabled) return false;
@@ -83,7 +93,24 @@
       renderWidget();
     }
   }
-  async function signOut() { if (client) { try { await client.auth.signOut(); } catch (e) {} } session = null; setStatus('signedout'); renderWidget(); }
+  async function signOut() {
+    // 释放实时订阅与防抖推送，避免退出后残留连接/定时器
+    if (channel) {
+      try { channel.unsubscribe(); } catch (e) {}
+      try { if (client && client.removeChannel) client.removeChannel(channel); } catch (e) {}
+      channel = null;
+    }
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    // 退出：scope:'local' 只清本端会话，不撤销其它设备/另一工作台的会话
+    if (client) {
+      try { await client.auth.signOut({ scope: 'local' }); } catch (e) { console.warn('[sync] signOut', e); }
+    }
+    // 兜底：无论网络成败，强制清除本端持久化令牌，防刷新后会话复活
+    clearAuthToken();
+    session = null;
+    setStatus('signedout');
+    renderWidget();
+  }
 
   // ---- 数据 ----
   var pkOf = function (r) { return [r.stream, r.year, r.month, r.week, r.dimension || '_'].join('|'); };
