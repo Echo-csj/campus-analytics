@@ -43,6 +43,13 @@
   function saveTargetC(v) {
     try { localStorage.setItem(TARGET_C_KEY, String(v)); } catch (e) {}
   }
+  // 把当前 C 值同步到 CA.store，确保「推送分析到个人台」时能把 C 带下去
+  function persistTargetC(v) {
+    saveTargetC(v);
+    try {
+      CA.store.upsert({ stream: 'kezuTargetC', year: 0, month: 0, week: 0, dimension: 'C', values: { C: +v || 0 }, importedAt: Date.now() });
+    } catch (e2) { console.warn('[app] persistTargetC failed', e2); }
+  }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   // 导出数值格式化：比例(率)以百分数数值(×100)呈现，比类保持原倍数，其余保持数值
@@ -1758,8 +1765,10 @@
 
     fillMonths();
     draw();
+    // 初始化时就把当前 C（含默认值）同步到 store，避免用户未修改直接推送时丢失
+    persistTargetC(state.C);
 
-    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); try { CA.store.upsert({ stream: 'kezuTargetC', year: 0, month: 0, week: 0, dimension: 'C', values: { C: state.C }, importedAt: Date.now() }); } catch (e2) {} draw(); });
+    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; persistTargetC(state.C); draw(); });
     $('#dtMonthSel').addEventListener('change', e => { const p = e.target.value.split('-'); state.year = +p[0]; state.month = +p[1]; draw(); });
   }
 
@@ -2906,8 +2915,10 @@
     if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
     fillMonthSelects();
     loadCurrentMonth();
+    // 初始化时同步 C 到 store，避免只在此页填写后推送失败
+    persistTargetC(state.C);
 
-    $('#tC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); recompute(); });
+    $('#tC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; persistTargetC(state.C); recompute(); });
     $('#tYearSel').addEventListener('change', e => {
       state.year = parseInt(e.target.value, 10); fillMonthSelects(); loadCurrentMonth();
     });

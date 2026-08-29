@@ -169,6 +169,8 @@
     var kezuActual = all.filter(function (r) { return r.stream === 'kezuActual' && r.year && r.month; });
     var kezuCRec = all.find(function (r) { return r.stream === 'kezuTargetC' && r.values; });
     var kezuC = kezuCRec && kezuCRec.values ? kezuCRec.values.C : null;
+    if (kezuC != null && typeof kezuC === 'string') kezuC = parseFloat(kezuC);
+    if (kezuC != null && !isFinite(kezuC)) kezuC = null;
     return {
       generatedAt: new Date().toISOString(),
       totalRecords: all.length,
