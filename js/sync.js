@@ -170,12 +170,24 @@
     var ocl = CA.store.clearAll;
     CA.store.clearAll = function () { var a = ocl(); if (!applyingRemote) schedulePush(CA.store.readAll()); return a; };
   }
+  function onVisibility() { if (!document.hidden && session) applyRemote(); }
   function subscribeRealtime() {
     if (!session || !client) return;
-    channel = client.channel(TABLE + ':' + uid())
-      .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: 'user_id=eq.' + uid() }, function () { applyRemote(); })
-      .subscribe();
-    document.addEventListener('visibilitychange', function () { if (!document.hidden && session) applyRemote(); });
+    try {
+      // 幂等：释放已存在的同频道订阅，避免重复订阅触发“cannot add postgres_changes after subscribe”
+      if (channel) {
+        try { channel.unsubscribe(); } catch (e) {}
+        try { client.removeChannel(channel); } catch (e) {}
+        channel = null;
+      }
+      channel = client.channel(TABLE + ':' + uid())
+        .on('postgres_changes', { event: '*', schema: 'public', table: TABLE, filter: 'user_id=eq.' + uid() }, function () { applyRemote(); })
+        .subscribe();
+      document.removeEventListener('visibilitychange', onVisibility);
+      document.addEventListener('visibilitychange', onVisibility);
+    } catch (e) {
+      console.warn('[sync] subscribeRealtime 失败（不影响登录）:', e && e.message ? e.message : e);
+    }
   }
 
   // ---- 联动桥：推送分析快照到个人台 ----
