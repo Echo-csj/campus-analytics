@@ -1759,7 +1759,7 @@
     fillMonths();
     draw();
 
-    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); draw(); });
+    $('#dtC').addEventListener('input', e => { state.C = parseFloat(e.target.value) || 0; saveTargetC(state.C); try { CA.store.upsert({ stream: 'kezuTargetC', year: 0, month: 0, week: 0, dimension: 'C', values: { C: state.C }, importedAt: Date.now() }); } catch (e2) {} draw(); });
     $('#dtMonthSel').addEventListener('change', e => { const p = e.target.value.split('-'); state.year = +p[0]; state.month = +p[1]; draw(); });
   }
 

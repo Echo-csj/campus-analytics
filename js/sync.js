@@ -162,7 +162,20 @@
     // 历史月度（定稿月，按月份升序），供个人台计算环比/同比
     var monthlyHistory = all.filter(function (r) { return r.stream === 'monthly' && r.year && r.month; })
       .sort(function (a, b) { return (a.year - b.year) || (a.month - b.month); });
-    return { generatedAt: new Date().toISOString(), totalRecords: all.length, latestByStream: byStream, monthlyHistory: monthlyHistory };
+    // 科组联动：多记录流（科组×月 / 科组×周 / 评比按年）整组下发，供个人台「最佳科组排名 / 科组生产预测」使用。
+    // latestByStream 每个 stream 仅保留一条，无法承载多记录流，故单独成组下发。
+    var kezuDetail = all.filter(function (r) { return r.stream === 'bestkezu' && r.year && r.month; });
+    var kezuScore = all.filter(function (r) { return r.stream === 'bestkezu_score' && r.year; });
+    var kezuActual = all.filter(function (r) { return r.stream === 'kezuActual' && r.year && r.month; });
+    var kezuCRec = all.find(function (r) { return r.stream === 'kezuTargetC' && r.values; });
+    var kezuC = kezuCRec && kezuCRec.values ? kezuCRec.values.C : null;
+    return {
+      generatedAt: new Date().toISOString(),
+      totalRecords: all.length,
+      latestByStream: byStream,
+      monthlyHistory: monthlyHistory,
+      kezu: { detail: kezuDetail, score: kezuScore, actual: kezuActual, C: kezuC }
+    };
   }
   async function pushSharedSnapshot() {
     if (!session) { toast('请先登录以启用云端'); return; }
