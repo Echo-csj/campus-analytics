@@ -102,6 +102,64 @@
     const diff = Math.round((ML - MS) / 86400000);
     return (diff + 1) / 7; // diff 恒为 7 的倍数 → 整数
   }
+  // —— 科组生产预测「目标帧」：以当前日期(人工月)为锚的月份推进决策（2026-09-03 修复）——
+  // 背景：原逻辑参考月 =「最佳科组(bestkezu)有数据的最大月份」，预测月 = 参考月 + 1；
+  //   日历日期只参与「完成率第几周」，不参与月份推进 → 月初若上月 bestkezu 未录入，
+  //   预测会无限期停留在过期月份且无任何提示（形似"卡死/未自动刷新"）。
+  // 口径：预测目标月 = 当前人工月（执行中的月份）；默认参考月 = bestkezu 中
+  //   「≤ 上一个人工月」的最近数据月（最新已完成参考月）。
+  //   - bestkezu 已覆盖到上一个人工月 → ok：预测自动推进到当前人工月；
+  //   - bestkezu 落后于上一个人工月 → lag：参考月回退最近可用，并给出缺口区间，提示补录后自动推进；
+  //   - bestkezu 为空 → empty：提示应上传「上一个人工月」的数据。
+  // monthList: [{year,month},...]（可乱序/含未来月，内部排序去重）；date: 当前日期（测试可注入）。
+  const kzMonthKey = mm => mm.year * 12 + mm.month;
+  function kzPrevMonth(mm) { let y = mm.year, m = mm.month - 1; if (m < 1) { m = 12; y -= 1; } return { year: y, month: m }; }
+  function kzNextMonth(mm) { let y = mm.year, m = mm.month + 1; if (m > 12) { m = 1; y += 1; } return { year: y, month: m }; }
+  const kzLabel = mm => (mm ? mm.year + ' 年 ' + mm.month + ' 月' : '—');
+  function kezuTargetFrame(monthList, date) {
+    const cur = manualMonthOf(date || new Date());
+    const prev = kzPrevMonth(cur); // 上一个人工月 = 最新「已完成」人工月（预测参考目标）
+    const seen = {};
+    const sorted = (monthList || [])
+      .filter(m => m && m.year && m.month)
+      .map(m => ({ year: m.year, month: m.month }))
+      .sort((a, b) => kzMonthKey(a) - kzMonthKey(b))
+      .filter(m => { const k = kzMonthKey(m); if (seen[k]) return false; seen[k] = 1; return true; });
+    const best = sorted.length ? sorted[sorted.length - 1] : null;
+    const past = sorted.filter(m => kzMonthKey(m) <= kzMonthKey(prev)); // ≤ 上一个人工月
+    const lastPast = past.length ? past[past.length - 1] : null;
+    let ref = null, state = 'empty', lagged = false, missing = [];
+    if (!sorted.length) {
+      state = 'empty';
+    } else if (lastPast) {
+      ref = lastPast;
+      lagged = kzMonthKey(lastPast) < kzMonthKey(prev);
+      if (lagged) {
+        state = 'lag';
+        // 缺口区间：(ref, prev] —— 从 ref 下一个月到 prev
+        missing = [];
+        let it = kzNextMonth(ref);
+        while (kzMonthKey(it) <= kzMonthKey(prev)) { missing.push(it); it = kzNextMonth(it); }
+      } else {
+        state = 'ok';
+      }
+    } else {
+      // bestkezu 全部晚于当前人工月（异常超前数据）→ 沿用最新数据月兜底（与原行为一致）
+      ref = best;
+      state = 'ok';
+    }
+    const pred = ref ? kzNextMonth(ref) : null;
+    let note;
+    if (state === 'empty') {
+      note = '暂无「最佳科组」数据。上传最近已完成月份（' + kzLabel(prev) + '）数据后，将自动生成 ' + kzLabel(cur) + ' 的科组生产预测。';
+    } else if (state === 'lag') {
+      const missTxt = missing.length === 1 ? kzLabel(missing[0]) : (kzLabel(missing[0]) + ' 至 ' + kzLabel(missing[missing.length - 1]) + '（共 ' + missing.length + ' 个月）');
+      note = '当前已到 ' + kzLabel(cur) + '，但「最佳科组」最新数据为 ' + kzLabel(ref) + '，预测暂按 ' + kzLabel(pred) + ' 生成。请上传 ' + missTxt + ' 的最佳科组数据，预测将自动更新到 ' + kzLabel(cur) + '。';
+    } else {
+      note = '当前人工月 ' + kzLabel(cur) + '：默认参考 ' + kzLabel(ref) + '，预测 ' + kzLabel(pred) + '（最佳科组最新数据 ' + kzLabel(best) + '）。';
+    }
+    return { cur, prev, best, ref, pred, state, lagged, missing, note };
+  }
   // 由周报(weekly 流)派生「月度数据」：每月最后一周周报。
   // 【判定口径】周次界定以**报表自带字段**为准，忽略上传时间、不做任何日历日期重建：
   //   - 直接按每条周报声明的 (year, month) 分组（即用户认定其所属的人工月）；
@@ -531,7 +589,7 @@
   CA.aggregate = {
     DATA_LAYERS,
     monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
-    manualLastDay, manualMonthOf, manualMonthWeekCount, tkpiMonthDerived, tkpiHalfLabel, tkpiHalfYear, satisfactionFromMonthEnd, yearOptions,
+    manualLastDay, manualMonthOf, manualMonthWeekCount, kezuTargetFrame, tkpiMonthDerived, tkpiHalfLabel, tkpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate,
     YEARLY_RULES, yearlyAggregate,
   };

@@ -1650,12 +1650,18 @@
     }
 
     const months = kezuMonths();
-    const state = { C: loadTargetC(1000), year: 2026, month: 7 };
-    if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
+    // 月份推进：以当前日期(人工月)为锚（AGG.kezuTargetFrame），预测月自动指向当前人工月，
+    // 参考月 = bestkezu 中「≤ 上一个人工月」的最近数据月；数据滞后/缺失时给出补录指引。
+    // 不再使用硬编码兜底 {year:2026,month:7}，也不再仅依赖「bestkezu 最新月 + 1」导致预测停在过期月份。
+    const frame = AGG.kezuTargetFrame(months, new Date());
+    const state = { C: loadTargetC(1000), year: 0, month: 0 };
+    if (frame.ref) { state.year = frame.ref.year; state.month = frame.ref.month; }
+    else if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
 
     $('#dashBody').innerHTML =
       '<div class="panel"><div class="panel-title">科组生产预测（下月指标）</div>' +
-      '<div class="panel-desc">底层逻辑：用<b>已完成月份</b>（参考月份）的最佳科组数据，预测<b>下个月</b>（预测月份）的生产指标。月度数据完成后，在此输入校区生产指标即可一键获得各科的预测下达值。</div>' +
+      '<div class="panel-desc">底层逻辑：用<b>已完成月份</b>（参考月份）的最佳科组数据，预测<b>下个月</b>（预测月份）的生产指标。预测目标月随当前日期自动推进到<b>当前人工月</b>；月度数据完成后，在此输入校区生产指标即可一键获得各科的预测下达值。</div>' +
+      '<div id="dtFrameNote" class="field-note" style="margin-bottom:10px"></div>' +
       '<div class="grid grid-3" style="margin-bottom:10px">' +
         '<div class="field"><label>校区生产指标（总盘 C）</label><input type="number" id="dtC" class="mono" min="0" step="any" value="' + state.C + '"></div>' +
         '<div class="field"><label>参考月份（已完成月）</label><select id="dtMonthSel" class="mono"></select></div>' +
@@ -1677,7 +1683,7 @@
       if (!depts) {
         $('#dtPred').value = '';
         $('#dtConsist').innerHTML = '';
-        $('#dtResult').innerHTML = '<div class="empty">「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据，无法预测。请先在「最佳科组」模块上传该月数据，或切换到有数据的参考月份。</div>';
+        $('#dtResult').innerHTML = (state.year ? '<div class="empty">「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据，无法预测。请先在「最佳科组」模块上传该月数据，或切换到有数据的参考月份。</div>' : '<div class="empty">暂无「最佳科组」数据。请先在「最佳科组」模块上传数据（参考上方提示的应上传月份），系统将自动生成科组生产预测。</div>');
         return;
       }
       const pm = predMonth(state.year, state.month);
@@ -1765,6 +1771,13 @@
 
     fillMonths();
     draw();
+    // 目标帧提示：正常时轻提示；数据滞后/缺失时醒目告知"当前已是哪个月、缺哪个月数据、如何自动推进"
+    const fnEl = $('#dtFrameNote');
+    if (fnEl && frame.note) {
+      fnEl.innerHTML = frame.state === 'ok'
+        ? '<span class="muted">' + esc(frame.note) + '</span>'
+        : '<span style="color:#b45309;font-weight:600">⚠ ' + esc(frame.note) + '</span>';
+    }
     // 初始化时就把当前 C（含默认值）同步到 store，避免用户未修改直接推送时丢失
     persistTargetC(state.C);
 
@@ -2404,12 +2417,13 @@
   }
 
   function renderTarget() {
-    const state = { C: loadTargetC(1000), year: 2026, month: 7, depts: [] };
+    const state = { C: loadTargetC(1000), year: 0, month: 0, depts: [] };
     let calc = null;
     let html = `
       <div class="panel">
         <div class="panel-title">参数设置与数据源校验</div>
-        <div class="panel-desc">① 校区生产指标（总盘 C）为人工输入；② 参考月份 = 取「最佳科组」中该月数据（即上月单科数 / 课时）；③ 系统自动用最佳科组课时合计数与数据源「1v1 月生产课时」做一致性校验。</div>
+        <div class="panel-desc">① 校区生产指标（总盘 C）为人工输入；② 参考月份 = 取「最佳科组」中该月数据（即上月单科数 / 课时），预测目标月随当前日期自动推进到<b>当前人工月</b>；③ 系统自动用最佳科组课时合计数与数据源「1v1 月生产课时」做一致性校验。</div>
+        <div id="tFrameNote" class="field-note" style="margin-bottom:12px"></div>
         <div class="grid grid-3" style="margin-bottom:12px">
           <div class="field"><label>校区生产指标（总盘 C）</label><input type="number" id="tC" class="mono" min="0" step="any" value="${state.C}"></div>
           <div class="field"><label>参考年份</label><select id="tYearSel" class="mono"></select></div>
@@ -2906,13 +2920,22 @@
         loaded.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
         state.depts = loaded; toast('已读入 ' + loaded.length + ' 个科组（' + state.year + ' 年 ' + state.month + ' 月）');
       }
-      else { state.depts = []; toast('「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据'); }
+      else { state.depts = []; toast(state.year ? '「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据' : '暂无「最佳科组」数据，请先到「最佳科组」上传月度数据'); }
       renderDeptInputs(); recompute();
     }
 
-    // 初始化：默认读入最新月份
+    // 初始化：默认参考月随当前日期自动推进（AGG.kezuTargetFrame），预测 = 当前人工月；
+    // 数据滞后/缺失时回退最近可用参考月，并显示补录指引（不再硬编码 2026/7、不再停在过期月份无提示）
     const months = kezuMonths();
-    if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
+    const frame = AGG.kezuTargetFrame(months, new Date());
+    if (frame.ref) { state.year = frame.ref.year; state.month = frame.ref.month; }
+    else if (months.length) { state.year = months[months.length - 1].year; state.month = months[months.length - 1].month; }
+    const fnEl2 = $('#tFrameNote');
+    if (fnEl2 && frame.note) {
+      fnEl2.innerHTML = frame.state === 'ok'
+        ? '<span class="muted">' + esc(frame.note) + '</span>'
+        : '<span style="color:#b45309;font-weight:600">⚠ ' + esc(frame.note) + '</span>';
+    }
     fillMonthSelects();
     loadCurrentMonth();
     // 初始化时同步 C 到 store，避免只在此页填写后推送失败
