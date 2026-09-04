@@ -33,12 +33,7 @@
   }
 
   function toNum(v) {
-    if (v == null) return null;
-    if (typeof v === 'number') return v;
-    let s = String(v).replace(/[%%,，\s]/g, '').replace(/[¥￥]/g, '');
-    if (s === '' || s === '#DIV/0!' || s === '#VALUE!' || s === '/') return null;
-    const n = Number(s);
-    return isFinite(n) ? n : null;
+    return CA.normalize.toNum(v);
   }
 
   function sheetToMatrix(ws) {

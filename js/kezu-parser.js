@@ -16,16 +16,7 @@
 
   // —— 基础工具 ——
   function toNum(v) {
-    if (v == null) return null;
-    if (typeof v === 'number') return v;
-    if (typeof v === 'boolean') return v ? 1 : 0;
-    let s = String(v).trim().replace(/,/g, '');
-    if (s === '' || s === '-' || s === '—' || s === '—' || s.toLowerCase() === 'n/a' || s.toLowerCase() === 'na') return null;
-    let pct = false;
-    if (s.endsWith('%')) { pct = true; s = s.slice(0, -1).trim(); }
-    const n = parseFloat(s);
-    if (isNaN(n)) return null;
-    return pct ? n / 100 : n;
+    return CA.normalize.toNum(v);
   }
 
   function parseMonth(v) {

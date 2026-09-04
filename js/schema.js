@@ -181,9 +181,12 @@
     (f.aliases || []).forEach(a => { weeklyLabelMapAliases[a] = f; });
   });
 
+  // 参考课次 = 周次 × 周课时基数（统一口径，避免多处硬编码 16）
+  const REF_SESSIONS_PER_WEEK = 16;
+
   CA.SCHEMA = {
     weeklyFields, weeklyLabelMap, weeklyLabelMapCI, weeklyLabelMapAliases, satisfactionItems,
-    kezuFields, kpiFields, tkpiFields,
+    kezuFields, kpiFields, tkpiFields, REF_SESSIONS_PER_WEEK,
   };
 
 })(window);

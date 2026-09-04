@@ -7,8 +7,8 @@
  *   月度数据 (store stream = 'monthly')：每月最后一周周报。
  *      判定口径：报表自带 weekSeq === totalWeeksOfMonth（忽略上传时间、不做任何日历日期重建）。
  *      关联边界：季度汇总 / 年度汇总 / 五项满意度 / 数据库视图(年度各月对比) / 科组月度跟踪。
- *      生成方式：仅通过「数据源 → 月度数据」面板的手动上传入口写入 monthly 流（上传时校验 weekSeq===totalWeeksOfMonth）。
- *                不与周度数据自动同步，二者独立维护，避免「自动 + 手动」混合导致的数据混乱。
+ *      生成方式：由「数据源 → 月度数据」面板的「从周报生成月度数据」按钮【显式派生】自 weekly 流
+ *                （取每月月末周 weekSeq===totalWeeksOfMonth 写入 monthly 流，带生成日志），校区层单一源头=周报。
  *   固定数据源：所有月度汇总指标均从 monthly 流派生，UI 不散算。
  *      季度汇总 = 当季各月「月度数据」横向聚合（last / sum / avg / derived）
  *      年度汇总 = 全年各月「月度数据」横向聚合
@@ -160,6 +160,17 @@
     }
     return { cur, prev, best, ref, pred, state, lagged, missing, note };
   }
+  // 单月「1V1 月生产完成率」单一权威口径：生产课时 / 目标课时（小数 0–1）。
+  // 月度派生(materializeMonthlyFromWeekly) 与季度/年度聚合 均以此口径为基准；
+  // 季度/年度为「各月生产课时之和 / 各月目标课时之和」（见 QUARTERLY_RULES / YEARLY_RULES 派生公式）。
+  function v1MonthRate(rec) {
+    const v = rec && rec.values;
+    if (!v) return null;
+    const prod = v.v1MonthProduced, tgt = v.v1MonthTarget;
+    if (prod == null || tgt == null || tgt === 0) return null;
+    return prod / tgt;
+  }
+
   // 由周报(weekly 流)派生「月度数据」：每月最后一周周报。
   // 【判定口径】周次界定以**报表自带字段**为准，忽略上传时间、不做任何日历日期重建：
   //   - 直接按每条周报声明的 (year, month) 分组（即用户认定其所属的人工月）；
@@ -187,11 +198,33 @@
     // 与自然月月度周报保持同一派生口径（比例归一化 + 完成率重写）
     return result.map(r => {
       r = normalizeWeeklyValues(r);
-      const prod = r.values.v1MonthProduced, tgt = r.values.v1MonthTarget;
-      if (prod != null && tgt != null && tgt !== 0) r.values.v1MonthRate = prod / tgt;
-      else { const rate = r.values.v1MonthRate; if (typeof rate === 'number' && rate > 0 && rate < 0.05) r.values.v1MonthRate = rate * 100; }
+      const rate = v1MonthRate(r);
+      if (rate != null) r.values.v1MonthRate = rate;
+      else { const raw = r.values.v1MonthRate; if (typeof raw === 'number' && raw > 0 && raw < 0.05) r.values.v1MonthRate = raw * 100; }
       return r;
     });
+  }
+
+  // 由周报(weekly 流)【显式、透明】派生「月度数据」：取每月月末周(weekSeq===totalWeeksOfMonth)，
+  // 写为 monthly 流记录(week=0, isMonthEnd=true)。这是校区层单一源头(周报)→月度数据的唯一派生路径，
+  // 不后台静默回退；配套「从周报生成月度数据」按钮 + 生成日志，可审计、可重跑。
+  // 返回可直接 STORE.upsert 的月度记录数组；campus 缺省「泉山」。
+  function materializeMonthlyFromWeekly(weeklyRecs) {
+    const picks = manualMonthEndWeeklies(weeklyRecs); // 月末周挑选 + 比例归一化 + v1MonthRate 重写
+    return picks.map(r => ({
+      stream: 'monthly',
+      campus: (r.campus || '泉山'),
+      year: r.year,
+      month: r.month,
+      week: 0,
+      dimension: '_',
+      isMonthEnd: true,
+      values: Object.assign({}, r.values),
+      rows: r.rows || null,
+      importedAt: Date.now(),
+      sourceWeek: (r.values && r.values.weekSeq != null) ? r.values.weekSeq : (r.week || 0),
+      derivedFrom: 'weekly',
+    }));
   }
 
   // 比例字段防御性归一化：统一存为小数(0–1)。旧数据/异常原表可能把 70.39 当 70.39% 存储。
@@ -199,9 +232,9 @@
   function normalizeRatio(key, val) {
     if (val == null || typeof val !== 'number' || !isFinite(val)) return val;
     const f = CA.SCHEMA.weeklyFields.find(x => x.key === key);
-    if (!f || f.type !== 'ratio' || f.unit === '比') return val;
-    if (f.canExceed100) return val;
-    return val > 1 ? val / 100 : val;
+    if (!f || f.type !== 'ratio') return val;
+    // 单一权威：委托 CA.normalize.toRatio（统一处理 '%' / 比 / canExceed100 / 裸整数百分数）
+    return CA.normalize.toRatio(val, { canExceed100: !!f.canExceed100, unit: f.unit });
   }
 
   // 清洗单条周报 values 中所有比例字段（用于兼容旧数据）
@@ -254,7 +287,7 @@
     const v1 = +(v.v1Students || 0), v6 = +(v.v6Students || 0);
     const wk = +(v.weekSeq || 0);
     const totalStudents = v1 + v6;
-    const refSessions = wk * 16;
+    const refSessions = wk * (CA.SCHEMA.REF_SESSIONS_PER_WEEK || 16);
     const monthSessions = +(v.monthSessions || 0);
     const saturation = refSessions ? monthSessions / refSessions : null;
     const v1Sessions = +(v.v1Sessions || 0);
@@ -440,7 +473,7 @@
 
   // 季度分组（按 年-季），返回可直接渲染的季度汇总记录
   function quarterlyAggregate(weeklyRecs, meOverride) {
-    const me = meOverride || monthEndWeeklies(weeklyRecs);
+    const me = meOverride || []; // 月度数据必须由 monthly 流显式提供（getMonthlyRecords()），不再由 weekly 静默派生
     const map = {};
     me.forEach(r => {
       const q = Math.floor((r.month - 1) / 3) + 1;
@@ -475,6 +508,7 @@
         });
       }
       // 生产完成率：仅基于同时有生产课时与目标课时的月份，避免缺失目标拉偏结果
+      // 单一口径（与 v1MonthRate 一致）：季度 = 各月生产课时之和 / 各月目标课时之和
       const validRateMonthsQ = g.months.filter(r => r.values.v1MonthProduced != null && r.values.v1MonthTarget != null);
       if (validRateMonthsQ.length) {
         const sumProd = validRateMonthsQ.reduce((s, r) => s + r.values.v1MonthProduced, 0);
@@ -546,7 +580,7 @@
 
   // 年度汇总：按年聚合所有月度周报
   function yearlyAggregate(weeklyRecs, year, meOverride) {
-    const me = (meOverride || monthEndWeeklies(weeklyRecs)).filter(r => r.year === year);
+    const me = (meOverride || []).filter(r => r.year === year); // 月度数据必须由 monthly 流显式提供，不再由 weekly 静默派生
     if (!me.length) return null;
     me.sort((a, b) => a.month - b.month);
     const months = me;
@@ -575,6 +609,7 @@
       });
     }
     // 年度生产完成率：仅基于同时有生产课时与目标课时的月份，避免缺失目标拉偏结果
+    // 单一口径（与 v1MonthRate 一致）：年度 = 各月生产课时之和 / 各月目标课时之和
     const validRateMonthsY = months.filter(r => r.values.v1MonthProduced != null && r.values.v1MonthTarget != null);
     if (validRateMonthsY.length) {
       const sumProd = validRateMonthsY.reduce((s, r) => s + r.values.v1MonthProduced, 0);
@@ -586,12 +621,105 @@
     return { year, values: yv, months, sourceMonths: months.map(r => r.month), missingMonths };
   }
 
+  // —— 最佳科组（bestkezu）季度 / 年度聚合 ——
+  // 输入为「扁平化」最佳科组记录（kezuFlat：subject/year/month/quarter + hours/weeks/subjects/xufei/jieke/tuifei/tingke/quit/teachers）。
+  // 口径与 kezu-schema.js 的 DENOM 一致；聚合逻辑集中在 CA.aggregate，不再散落于 UI。
+  function kezuAnnual(rs) {
+    const bySubj = {};
+    rs.forEach(r => { (bySubj[r.subject] = bySubj[r.subject] || []).push(r); });
+    const out = [];
+    Object.keys(bySubj).forEach(subj => {
+      const g = bySubj[subj];
+      const sum = k => g.reduce((a, r) => a + (r[k] || 0), 0);
+      const n = g.length;
+      const totalHours = sum('hours'), totalWeeks = sum('weeks');
+      const avgSubjects = n ? sum('subjects') / n : 0;
+      const xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
+      const last = g.slice().sort((a, b) => b.month - a.month)[0];
+      const lastTeachers = last.teachers || 0;
+      out.push({
+        subject: subj, totalHours, totalWeeks,
+        avgSubjects: Math.round(avgSubjects * 10) / 10,
+        yearWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
+        xf, jk, tf, tk, qt,
+        xufeiRate: avgSubjects ? xf / avgSubjects : null,
+        jiekeRate: avgSubjects ? jk / avgSubjects : null,
+        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
+        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
+        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
+        teachers: lastTeachers
+      });
+    });
+    return out.sort((a, b) => b.totalHours - a.totalHours);
+  }
+  function kezuQuarter(rs) {
+    const byKey = {};
+    rs.forEach(r => {
+      const key = r.subject + '|' + r.quarter;
+      (byKey[key] = byKey[key] || []).push(r);
+    });
+    const out = [];
+    Object.keys(byKey).forEach(key => {
+      const g = byKey[key];
+      const [subj, q] = key.split('|');
+      const sum = k => g.reduce((a, r) => a + (r[k] || 0), 0);
+      const n = g.length;
+      const totalHours = sum('hours'), totalWeeks = sum('weeks');
+      const avgSubjects = n ? sum('subjects') / n : 0;
+      const xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
+      const last = g.slice().sort((a, b) => b.month - a.month)[0];
+      const lastTeachers = last.teachers || 0;
+      out.push({
+        subject: subj, quarter: +q, totalHours, totalWeeks,
+        avgSubjects: Math.round(avgSubjects * 10) / 10,
+        quarterWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
+        xf, jk, tf, tk, qt,
+        xufeiRate: avgSubjects ? xf / avgSubjects : null,
+        jiekeRate: avgSubjects ? jk / avgSubjects : null,
+        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
+        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
+        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
+        teachers: lastTeachers
+      });
+    });
+    return out.sort((a, b) => a.subject.localeCompare(b.subject) || (a.quarter - b.quarter));
+  }
+
+  // —— 校区指标分解 ↔ 科组层 关联对账（R3 双向哨兵）——
+  // 校区层单一源头=周报(派生 monthly)；科组层=kezuActual(生产预排+实际)+kezuTargetC(校区总盘C)+bestkezu。
+  // 对账：R1 科组实际生产课时合计 ↔ 校区月度生产课时；R2 校区生产总盘C ↔ 科组预排课时合计。
+  // 偏差超容差 → ok=false（UI 给告警，提示补录/核对）；数据缺失侧 ok=null（不参与判定）。
+  function linkageCheck(campus, y, m) {
+    campus = campus || '泉山';
+    const get = s => (CA.store.list(s) || []).filter(r => (r.campus || '泉山') === campus && r.year === y && r.month === m);
+    const monthly = get('monthly')[0];
+    const actuals = get('kezuActual');
+    const targetC = (CA.store.list('kezuTargetC') || []).filter(r => (r.campus || '泉山') === campus)[0];
+    const num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
+    const TOL = 0.01;
+    const kezuProd = actuals.reduce((s, r) => s + (num(r.values && r.values.produced) || 0), 0);
+    const campusProd = monthly ? num(monthly.values.v1MonthProduced) : null;
+    const kezuSched = actuals.reduce((s, r) => s + (num(r.values && r.values.scheduled) || 0), 0);
+    const cVal = targetC ? num(targetC.values && targetC.values.C) : null;
+    const checks = [
+      { name: '科组实际生产课时合计 ↔ 校区月度生产课时', kezuVal: kezuProd, campusVal: campusProd,
+        ok: campusProd == null ? null : Math.abs(kezuProd - campusProd) <= Math.max(TOL * (Math.abs(campusProd) || 1), 1) },
+      { name: '校区生产总盘C ↔ 科组预排课时合计', kezuVal: kezuSched, campusVal: cVal,
+        ok: cVal == null ? null : Math.abs(kezuSched - cVal) <= Math.max(TOL * (Math.abs(cVal) || 1), 1) },
+    ];
+    const hasData = !!(monthly || actuals.length || targetC);
+    const okAll = checks.every(c => c.ok === true);
+    return { year: y, month: m, campus, checks, ok: hasData ? okAll : null, hasData };
+  }
+
   CA.aggregate = {
     DATA_LAYERS,
-    monthEndWeeklies, manualMonthEndWeeklies, compareYearStandard,
+    monthEndWeeklies, manualMonthEndWeeklies, materializeMonthlyFromWeekly, v1MonthRate, compareYearStandard,
     manualLastDay, manualMonthOf, manualMonthWeekCount, kezuTargetFrame, tkpiMonthDerived, tkpiHalfLabel, tkpiHalfYear, satisfactionFromMonthEnd, yearOptions,
     QUARTERLY_RULES, quarterlyAggregate,
     YEARLY_RULES, yearlyAggregate,
+    monthCashOf,
+    kezuQuarter, kezuAnnual, linkageCheck,
   };
 
 })(window);
