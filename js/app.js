@@ -151,6 +151,19 @@
   function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
   function updateCount() { $('#recordCount').textContent = STORE.readAll().length + ' 条记录'; }
 
+  // 当月「合理最大周次」上限：以模板「当月周数」(totalWeeksOfMonth) 的【最小声明值】为权威上限，
+  // 其次取含 weekSeq 记录的最小周次，最后兜底 5（DOS 月份通常 ≤5 周，超出者视为月末周被误标为第5/6周的脏数据）。
+  // 取【最小】而非【最大】：误标脏数据会把周数"撑大"（如把月末周存成第5周且模板写当月5周），
+  // 真实月长应取各记录中最小的声明值，从而把超出者判定为脏数据过滤/清理。
+  // 用于 latestV1 与周报对比看板过滤/清理异常周次，避免脏记录污染"最新一周"判定。
+  function legitMaxWeek(recs) {
+    const tots = (recs || []).map(r => r.values && r.values.totalWeeksOfMonth != null ? r.values.totalWeeksOfMonth : null).filter(x => x != null);
+    if (tots.length) return Math.min.apply(null, tots);
+    const seqs = (recs || []).map(r => r.values && r.values.weekSeq != null ? r.values.weekSeq : null).filter(x => x != null);
+    if (seqs.length) return Math.min.apply(null, seqs);
+    return 5;
+  }
+
   // —— 上传面板（通用）——
   function uploadPanelHTML(stream) {
     const p = inferPeriod();
@@ -1133,7 +1146,7 @@
           <div class="uc-ico">${uploadIco}</div>
           <div>
             <div class="uc-title">历史周报批量入库</div>
-            <div class="uc-sub">上传 DOS 周报（各周），自动按文件名/内容判定年·月·周并写入<b>周度数据</b>。本入口<b>仅维护周度数据</b>（用于「周报对比」），<b>不会</b>自动生成月度数据；月度数据请在上方「月度数据」面板单独手动上传，两者相互独立、互不干扰。</div>
+            <div class="uc-sub">上传 DOS 周报（各周），自动按文件名/内容判定年·月·周并写入<b>周度数据</b>（用于「周报对比」）。系统会按文件名「第X周」或报表内「第几周/当月周数」自动判定周次，并预填到「默认周」；如判定有误，请在入库前直接修改「默认周」输入框。<b>月度数据无需在此上传</b>——校区层单一源头为周报，请在「月度数据」面板点「从周报生成月度数据」由周报显式派生。</div>
           </div>
         </div>
         <div class="uc-files" id="cmpFileList"></div>
@@ -1149,7 +1162,7 @@
       </div>`;
   }
 
-  function parseCmpFile(file, defYr, defMo, defWk) {
+  function parseCmpFile(file, defYr, defMo, defWk, userSetWk) {
     const name = file.name || '';
     let year = defYr, month = defMo, week = defWk;
     let yearFromName = false, monthFromName = false;
@@ -1157,15 +1170,17 @@
     const mm = name.match(/(\d{1,2})\s*月/); if (mm) { const m = parseInt(mm[1], 10); if (m >= 1 && m <= 12) { month = m; monthFromName = true; } }
     const wm = name.match(/第\s*(\d+)\s*周/); if (wm) week = parseInt(wm[1], 10);
     return PARSER.parseWeekly(file, { year, month, week }).then(res => {
-      // 周序号以「报表自身」为准，避免被 inferPeriod 的 ceil(日期/7) 误算成「第5周」：
-      // 月末周报(weekSeq===totalWeeksOfMonth)即当月最后一周（4 周月=第4周），若误算为第5周，
-      // 会在周报对比产生幻影第5周、并在 latestV1 的 max-key 逻辑里盖过真正的最后一周。
-      // 优先级：报表 weekSeq > 月末周取 totalWeeksOfMonth > 文件名第x周 > 默认周次。
-      let finalWeek = week;
       const det = res.detected || {};
-      if (det.weekSeq != null) finalWeek = det.weekSeq;
+      // 周序号判定：
+      // - 用户显式改过「默认周」输入框(userSetWk=true) → 以用户输入为准（权威覆盖，含月末周纠偏）；
+      // - 否则自动推断优先级：文件名「第X周」> 报表 weekSeq > 月末周 totalWeeksOfMonth > 面板默认(inferPeriod)。
+      //   面板默认(inferPeriod 的 ceil(日期/7)) 仅作最后兜底，月末报告不依赖它，避免被误算为第5周。
+      let finalWeek;
+      if (userSetWk) finalWeek = defWk;
+      else if (wm) finalWeek = parseInt(wm[1], 10);
+      else if (det.weekSeq != null) finalWeek = det.weekSeq;
       else if (det.isMonthEnd && det.totalWeeksOfMonth != null) finalWeek = det.totalWeeksOfMonth;
-      else if (!wm) finalWeek = week;
+      else finalWeek = week;
       const fields = Object.keys(res.values).length;
       return { period: { year, month, week: finalWeek }, values: res.values, rows: res.rows, unmatched: res.unmatched, detected: res.detected, fields, yearFromName, monthFromName };
     });
@@ -1205,6 +1220,8 @@
     const parseBtn = $('#cmpParse');
     let files = [];
     let pending = [];
+    // 记录「默认周」初始值（面板渲染时的 inferPeriod 默认），用于判断用户是否显式改过周次
+    const initWk = parseInt($('#cmpUWk').value, 10);
 
     fileInput.addEventListener('change', e => {
       files = [...(e.target.files || [])];
@@ -1212,6 +1229,9 @@
       listEl.innerHTML = files.map(f => '<div class="uc-file">📄 ' + f.name + '</div>').join('');
       commitBtn.disabled = true; pending = [];
       logEl.textContent = '已选 ' + files.length + ' 份，点「解析所选」预览。';
+      // 若文件名含「第X周」，自动把「默认周」预填为该周次，减少手动改；用户仍可改输入框覆盖
+      const wkFromName = files.map(f => { const m = (f.name || '').match(/第\s*(\d+)\s*周/); return m ? parseInt(m[1], 10) : null; }).find(x => x != null);
+      if (wkFromName != null) { const wkEl = document.getElementById('cmpUWk'); if (wkEl) wkEl.value = wkFromName; }
     });
 
     parseBtn.addEventListener('click', () => {
@@ -1219,8 +1239,9 @@
       const defYr = parseInt($('#cmpUYr').value, 10);
       const defMo = parseInt($('#cmpUMo').value, 10);
       const defWk = parseInt($('#cmpUWk').value, 10);
+      const userSetWk = defWk !== initWk; // 用户改过「默认周」→ 以用户输入为准；否则用自动推断
       logEl.textContent = '解析中…';
-      Promise.all(files.map(f => parseCmpFile(f, defYr, defMo, defWk)
+      Promise.all(files.map(f => parseCmpFile(f, defYr, defMo, defWk, userSetWk)
         .then(res => ({ file: f, res, ok: true }))
         .catch(err => ({ file: f, err: err.message, ok: false }))))
         .then(results => { pending = results; renderCmpParseLog(results); commitBtn.disabled = results.filter(r => r.ok).length === 0; });
@@ -1252,6 +1273,28 @@
     renderCmpCompare();
   }
 
+  // 清理异常周次：按 (campus,year,month) 分组，删除周序号 > 当月合理最大周数(legitMaxWeek) 的脏周报记录。
+  // legitMaxWeek 以模板「当月周数」(totalWeeksOfMonth) 为权威上限，故误标为第5/6周的月末周报会被判定为脏数据并删除。
+  function cleanupStrayWeeks() {
+    const rs = STORE.list('weekly');
+    const groups = {};
+    rs.forEach(r => { const k = (r.campus || '泉山') + '|' + r.year + '|' + r.month; (groups[k] = groups[k] || []).push(r); });
+    const toRemove = [];
+    Object.keys(groups).forEach(k => {
+      const g = groups[k];
+      const legitMax = legitMaxWeek(g);
+      g.forEach(r => { if ((r.week || 0) > legitMax) toRemove.push(r); });
+    });
+    if (!toRemove.length) { const n = $('#cleanupWkNote'); if (n) n.innerHTML = '<span class="ok-cell">未检测到异常周次，无需清理。</span>'; const d = $('#cleanupWkDetail'); if (d) { d.style.display = 'none'; d.innerHTML = ''; } return; }
+    const detail = toRemove.map(r => '• ' + (r.campus || '泉山') + ' ' + r.year + '年' + r.month + '月 第' + (r.week || 0) + '周' + (r.values && r.values.v1Students != null ? '（1V1=' + r.values.v1Students + '）' : '')).join('<br>');
+    if (!confirm('将删除以下 ' + toRemove.length + ' 条异常周次记录：\n\n' + toRemove.map(r => (r.campus || '泉山') + ' ' + r.year + '/' + r.month + ' 第' + (r.week || 0) + '周').join('\n') + '\n\n确认删除？（删除后可在周报对比上传面板以正确周次重新上传；正常周次不受影响）')) return;
+    toRemove.forEach(r => STORE.remove('weekly', r.year, r.month, r.week, r.dimension || '_', r.campus));
+    const n = $('#cleanupWkNote'); if (n) n.innerHTML = '<span class="ok-cell">已清理 ' + toRemove.length + ' 条异常周次。</span>';
+    const d = $('#cleanupWkDetail'); if (d) { d.style.display = 'block'; d.innerHTML = '<b>已删除：</b><br>' + detail; }
+    toast('已清理 ' + toRemove.length + ' 条异常周次');
+    renderCmpCompare();
+  }
+
   function renderCmpCompare() {
     const recs = STORE.list('weekly');
     const monthly = getMonthlyRecords();
@@ -1267,6 +1310,11 @@
     html += '<div class="panel-desc">若早期上传的周报因字段名大小写（如 1V1/1v1、1V6/1v6）差异，或报表使用「生产课时」等写法导致部分字段未被解析（值为空），可点下方按钮：系统用每条记录上传时保留的原始行（rows）重新匹配字段并补回缺失项，<b>无需重新上传文件</b>；已有值不会被覆盖。</div>';
     html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><button class="btn" id="reparseBtn">⟳ 重新解析 / 回填缺失字段</button><button class="btn ghost" id="reparseForceBtn">强制重解析（覆盖已有值）</button><span class="preview-note" id="reparseNote"></span></div>';
     html += '<div id="reparseDetail" class="uc-log" style="margin-top:8px;display:none"></div></div>';
+    // —— 清理异常周次：删除周序号超出当月合理周数(模板当月周数)的脏周报记录 ——
+    html += '<div class="panel" style="margin-top:14px"><div class="panel-title">清理异常周次（误标脏数据）</div>';
+    html += '<div class="panel-desc">若某月周报因上传时被误判为「第5/6周」（如月末周按日期推算错位），会污染「周报对比」并产生幻影周次、导致科组预测 1V1 人数取错。点下方按钮：系统按每月模板「当月周数」(totalWeeksOfMonth) 为上限，删除周序号超出的脏周报记录（安全：仅删超标周次，不删正常周次；删除前会列出将清理的项供确认）。</div>';
+    html += '<div class="row" style="align-items:center;gap:10px;flex-wrap:wrap"><button class="btn warn" id="cleanupWkBtn">🧹 清理异常周次</button><span class="preview-note" id="cleanupWkNote"></span></div>';
+    html += '<div id="cleanupWkDetail" class="uc-log" style="margin-top:8px;display:none"></div></div>';
     // —— 月度数据（由周报显式派生）管理面板 ——
     html += '<div class="panel" style="margin-top:18px"><div class="panel-title">月度数据（由周报显式派生）</div>';
     html += '<div class="panel-desc">月度数据 = 每月「最后一周」周报，是 <b>季度汇总 / 年度汇总 / 五项满意度 / 数据库视图</b> 的唯一数据来源。校区层单一源头为周报：点下方按钮，系统读取已入库的周报（weekly 流），自动取每月「月末周」（报表周次 weekSeq === 当月总周数 totalWeeksOfMonth）生成月度数据并写入，<b>无需再次手动上传文件</b>。重新上传周报后可再次点击以刷新。</div>';
@@ -1297,6 +1345,8 @@
     wireDeriveMonthly();
     renderLinkageCheck();
     $('#linkageCheckBtn').addEventListener('click', renderLinkageCheck);
+    // 清理异常周次（删除周序号超出当月合理周数的脏周报记录）
+    $('#cleanupWkBtn').addEventListener('click', cleanupStrayWeeks);
     function draw() {
       const y = parseInt(yrSel.value, 10);
       if (!years.length) { $('#cmpResult').innerHTML = '<div class="empty">暂无数据。请先点上方「从周报生成月度数据」派生各月月度数据（校区层单一源头为周报）。</div>'; destroyChart('cmpChart'); return; }
@@ -1659,10 +1709,20 @@
       const latestV1 = (function () {
         const rs = STORE.list('weekly');
         if (!rs.length) return null;
+        // 最新数据月（year/month 最大）
+        let latestKey = -1, latestY = 0, latestM = 0;
+        rs.forEach(r => { const k = (r.year || 0) * 100 + (r.month || 0); if (k > latestKey) { latestKey = k; latestY = r.year || 0; latestM = r.month || 0; } });
+        const monthRecs = rs.filter(r => r.year === latestY && r.month === latestM);
+        // 过滤异常周次（week 超出当月合理最大周数），优先取月末周(weekSeq===totalWeeksOfMonth)
+        const legitMax = legitMaxWeek(monthRecs);
+        const cand = monthRecs.filter(r => (r.week || 0) <= legitMax);
+        const pool = cand.length ? cand : monthRecs;
         let best = null;
-        rs.forEach(r => {
+        pool.forEach(r => {
           const key = (r.year || 0) * 10000 + (r.month || 0) * 100 + (r.week || 0);
-          if (!best || key > best.key) best = { key, v: (r.values && r.values.v1Students != null) ? num(r.values.v1Students) : null };
+          const isME = r.values && r.values.weekSeq != null && r.values.totalWeeksOfMonth != null && r.values.weekSeq === r.values.totalWeeksOfMonth;
+          const score = key + (isME ? 0.5 : 0); // 月末周优先
+          if (!best || score > best.score) best = { score, v: (r.values && r.values.v1Students != null) ? num(r.values.v1Students) : null };
         });
         return best ? best.v : null;
       })();
@@ -1948,14 +2008,22 @@
 
     function draw() {
       const [yy, mm] = $('#wcMonth').value.split('-').map(Number);
-      const wkRecs = recs.filter(r => r.year === yy && r.month === mm).sort((a, b) => (a.week || 0) - (b.week || 0));
+      let wkRecs = recs.filter(r => r.year === yy && r.month === mm).sort((a, b) => (a.week || 0) - (b.week || 0));
       if (!wkRecs.length) { $('#wcResult').innerHTML = '<div class="empty">该月暂无周报数据。</div>'; return; }
+      // 过滤异常周次（周序号超出当月合理最大周数，如月末周被误标为第5/6周），避免幻影周次干扰对比；
+      // 若全部为异常周次则退化为展示全部，保证不空白。
+      const legitMax = legitMaxWeek(wkRecs);
+      const stray = wkRecs.filter(r => (r.week || 0) > legitMax);
+      const clean = wkRecs.filter(r => (r.week || 0) <= legitMax);
+      const wkDisp = clean.length ? clean : wkRecs;
+      const strayNote = stray.length ? '<div class="warn" style="margin-bottom:10px">⚠ 检测到 ' + stray.length + ' 条异常周次（第' + stray.map(r => r.week).join('、') + '周，超出当月合理周数 ' + legitMax + '），已隐藏。可在「数据源 → 清理异常周次」删除。</div>' : '';
+      wkRecs = wkDisp;
       const weeks = wkRecs.map(r => '第' + (r.week || '?') + '周');
       const keys = ['teacherCount', 'campusTotal', 'coreTeacherCount', 'doubleThreeCount', 'v1Students', 'v1Subjects', 'v6Students', 'v6Subjects',
         'v1WeekTarget', 'v1WeekProduced', 'v1WeekRate', 'v6WeekProduced', 'weekCashTotal', 'v1WeekCash', 'v6WeekCash',
         'weekEff', 'weekSaturation', 'v1WeekXiexiao', 'xfWeekNum', 'jkWeekNum', 'tfWeekNum', 'tkNum', 'entryWeek', 'quitWeek'];
       const getv = (r, k) => (r.values && r.values[k] != null) ? r.values[k] : null;
-      let h = '<div class="preview-note">共 ' + wkRecs.length + ' 周数据。</div>';
+      let h = strayNote + '<div class="preview-note">共 ' + wkRecs.length + ' 周数据。</div>';
       h += '<div class="section-h">周度数据横向对比</div><div class="table-wrap"><table><thead><tr><th>指标</th>';
       weeks.forEach(w => h += '<th class="num">' + w + '</th>');
       h += '</tr></thead><tbody>';
