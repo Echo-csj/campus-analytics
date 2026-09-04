@@ -1157,8 +1157,15 @@
     const mm = name.match(/(\d{1,2})\s*月/); if (mm) { const m = parseInt(mm[1], 10); if (m >= 1 && m <= 12) { month = m; monthFromName = true; } }
     const wm = name.match(/第\s*(\d+)\s*周/); if (wm) week = parseInt(wm[1], 10);
     return PARSER.parseWeekly(file, { year, month, week }).then(res => {
+      // 周序号以「报表自身」为准，避免被 inferPeriod 的 ceil(日期/7) 误算成「第5周」：
+      // 月末周报(weekSeq===totalWeeksOfMonth)即当月最后一周（4 周月=第4周），若误算为第5周，
+      // 会在周报对比产生幻影第5周、并在 latestV1 的 max-key 逻辑里盖过真正的最后一周。
+      // 优先级：报表 weekSeq > 月末周取 totalWeeksOfMonth > 文件名第x周 > 默认周次。
       let finalWeek = week;
-      if (!wm && res.detected && res.detected.weekSeq != null) finalWeek = res.detected.weekSeq;
+      const det = res.detected || {};
+      if (det.weekSeq != null) finalWeek = det.weekSeq;
+      else if (det.isMonthEnd && det.totalWeeksOfMonth != null) finalWeek = det.totalWeeksOfMonth;
+      else if (!wm) finalWeek = week;
       const fields = Object.keys(res.values).length;
       return { period: { year, month, week: finalWeek }, values: res.values, rows: res.rows, unmatched: res.unmatched, detected: res.detected, fields, yearFromName, monthFromName };
     });
@@ -1303,6 +1310,7 @@
       const r = reparseStoredData(overwrite);
       const note = $('#reparseNote');
       if (note) note.innerHTML = '已处理 <b>' + r.records + '</b> 条记录，补回 <b>' + r.fields + '</b> 个字段（' + r.added + ' 条有更新）' +
+        (r.rekeyed ? '；<b class="ok-cell">' + r.rekeyed + ' 条已纠正周序号</b>（月末周报误存为第5周等已归位）' : '') +
         (r.noRows ? '；<span class="warn-cell">' + r.noRows + ' 条<b>无原始行</b>，无法回填（需重传文件）</span>' : '') +
         (r.withUnmatched ? '；<span class="warn-cell">' + r.withUnmatched + ' 条有<b>未匹配表头</b>（见下方明细）</span>' : '');
       // 诊断明细：列出有未匹配表头 / 无原始行的记录，便于定位缺映射 vs 缺原始行
@@ -1336,12 +1344,22 @@
   // 直接修复老构建上传、因大小写/缺映射而缺失字段的历史数据，无需重传文件。
   // 返回明细：每条记录是否保留原始行、哪些原始表头未匹配（用于区分「缺映射」vs「缺原始行」）。
   function reparseStoredData(overwrite) {
-    let records = 0, fields = 0, added = 0, noRows = 0, withUnmatched = 0;
+    let records = 0, fields = 0, added = 0, noRows = 0, withUnmatched = 0, rekeyed = 0;
     const details = [];
     ['weekly', 'monthly'].forEach(stream => {
       STORE.list(stream).forEach(r => {
         records++;
-        if (!r.rows || !r.rows.length) { noRows++; details.push({ y: r.year, m: r.month, w: r.week, stream, hasRows: false, unmatched: [] }); return; }
+        if (!r.rows || !r.rows.length) {
+          // 无原始行：若 values 中已有 weekSeq 且与入库 week 不符，仍可直接重定周（提升修复覆盖率）
+          if (stream === 'weekly' && r.values && r.values.weekSeq != null && r.values.weekSeq !== r.week) {
+            STORE.remove('weekly', r.year, r.month, r.week, r.dimension, r.campus);
+            STORE.upsert(Object.assign({}, r, { week: r.values.weekSeq }));
+            rekeyed++;
+            details.push({ y: r.year, m: r.month, w: r.values.weekSeq, stream, hasRows: true, unmatched: [] });
+            return;
+          }
+          noRows++; details.push({ y: r.year, m: r.month, w: r.week, stream, hasRows: false, unmatched: [] }); return;
+        }
         const res = CA.parser.reparseRows(r.rows);
         const existing = r.values || {};
         let changed = false;
@@ -1350,13 +1368,22 @@
             if (existing[k] !== res.values[k]) { existing[k] = res.values[k]; fields++; changed = true; }
           }
         });
+        // 周序号纠正（仅 weekly 流）：报表 weekSeq 与入库 week 不符时，以 weekSeq 重新定周，
+        // 修复被 ceil(日期/7) 误算的幻影周（如月末周报误存为「第5周」）。目标周已存在则覆盖（月末周权威）。
+        if (stream === 'weekly' && res.values.weekSeq != null && res.values.weekSeq !== r.week) {
+          STORE.remove('weekly', r.year, r.month, r.week, r.dimension, r.campus);
+          STORE.upsert(Object.assign({}, r, { week: res.values.weekSeq, values: existing }));
+          rekeyed++;
+          details.push({ y: r.year, m: r.month, w: res.values.weekSeq, stream, hasRows: true, unmatched: (res.unmatched || []).filter(Boolean) });
+          return;
+        }
         if (changed) { STORE.upsert(Object.assign({}, r, { values: existing })); added++; }
         const um = (res.unmatched || []).filter(Boolean);
         if (um.length) withUnmatched++;
         details.push({ y: r.year, m: r.month, w: r.week, stream, hasRows: true, unmatched: um });
       });
     });
-    return { records, fields, added, noRows, withUnmatched, details };
+    return { records, fields, added, noRows, withUnmatched, rekeyed, details };
   }
 
   // 月度数据面板：展示 monthly 流清单与计数（独立体系，与 weekly 流无关）
@@ -1902,10 +1929,19 @@
     const set = {}, months = [];
     recs.forEach(r => { const k = r.year + '-' + r.month; if (!set[k]) { set[k] = true; months.push({ year: r.year, month: r.month }); } });
     months.sort((a, b) => (a.year - b.year) || (a.month - b.month));
-    const def = months[months.length - 1];
-    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>月份</label><select id="wcMonth">' +
+    const now = new Date();
+    const cur = { year: now.getFullYear(), month: now.getMonth() + 1 };
+    const hasCur = months.some(m => m.year === cur.year && m.month === cur.month);
+    // 默认：优先当前月份（若有数据），否则取最新有数据的月份，避免停留在过期月份
+    const def = hasCur ? cur : months[months.length - 1];
+    const curLabel = cur.year + '年' + cur.month + '月';
+    const latestLabel = months.length ? (months[months.length - 1].year + '年' + months[months.length - 1].month + '月') : '—';
+    const monthNote = hasCur
+      ? '当前月份：<b>' + curLabel + '</b>（已显示）'
+      : '当前月份：<b>' + curLabel + '</b>；最新数据：<b>' + latestLabel + '</b>（已显示，可在上方切换）';
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>月份（当前 ' + curLabel + '）</label><select id="wcMonth">' +
       months.map(m => '<option value="' + m.year + '-' + m.month + '"' + (m.year === def.year && m.month === def.month ? ' selected' : '') + '>' + m.year + '年' + m.month + '月</option>').join('') + '</select></div>' +
-      '<div class="preview-note" style="margin-left:8px">数据来源：周度数据（DOS 周报）。仅做该月各周度数据横向对比——周度数据只关联本页，不进入月度 / 季度 / 年度 / 满意度计算。</div></div>';
+      '<div class="preview-note" style="margin-left:8px">数据来源：周度数据（DOS 周报）。' + monthNote + '。仅做该月各周度数据横向对比——周度数据只关联本页，不进入月度 / 季度 / 年度 / 满意度计算。</div></div>';
     html += '<div id="wcResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#wcMonth').addEventListener('change', draw);
