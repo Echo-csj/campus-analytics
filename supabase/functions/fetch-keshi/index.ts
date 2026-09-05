@@ -99,7 +99,14 @@ function collectInputs(html: string): Record<string, string> {
   return out;
 }
 function hasCaptcha(html: string): boolean {
-  return /captcha|验证码|txtCode|checkcode/i.test(html);
+  // 仅当页面存在真实需要填写的验证码控件（input/img 的 name/id/src/alt/class 等属性里含验证码标记）才判定为需要验证码。
+  // 避免页面文案、JS、隐藏 div 里的“验证码”字样误触发。
+  const tags = html.match(/<(input|img)[^>]*>/gi) || [];
+  for (const tag of tags) {
+    const attrs = (tag.match(/(?:name|id|type|src|alt|class|placeholder)\s*=\s*["']([^"']*)["']/gi) || []).join(" ").toLowerCase();
+    if (/(captcha|txtcode|checkcode|verifycode|validatecode|vcode|验证码)/.test(attrs)) return true;
+  }
+  return false;
 }
 
 // ── 表头列匹配（与前端 parseActualFile 对齐）──
