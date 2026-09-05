@@ -259,7 +259,7 @@ async function handle(req: Request): Promise<Response> {
     return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", tablesFound: tables.length }, 422, origin);
   }
   const rows: any[] = [];
-  for (let i = (chosen.indexOf(chosen.find((r) => r === chosen[0])) || 0) + 1; i < chosen.length; i++) {
+  for (let i = 1; i < chosen.length; i++) { // 跳过第 0 行表头
     const row = chosen[i];
     if (!row.length || row.every((c) => c === "")) continue;
     const get = (k: string) => row[headerMap![k]];
