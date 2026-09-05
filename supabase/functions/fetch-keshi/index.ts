@@ -19,7 +19,7 @@
 // ─────────────────────────────────────────────────────────────────────
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 
-const FN_VERSION = "2026-09-05a";
+const FN_VERSION = "2026-09-05b";
 
 // 91paike「科目」→ 本校「科组」聚合规则（业务口径）
 // 数学=数学+生物；英语=英语；文综=语文+地理+历史+政治；理综=物理+化学
@@ -148,12 +148,13 @@ function matchColumns(header: string[]): Record<string, number> {
   const studentAbsentAliases = ["学生请假课时", "生请假课时", "学生请假"];
   // 模板式预排/生产（兼容历史）
   const scheduledAliases = ["预排课时", "实际预排课时", "实际预排", "预排", "周预排", "预排课时数"];
-  const producedAliases = ["已确认课时", "实际生产课时", "实际生产", "生产课时", "实际课时", "实际产出", "已生产课时", "已产课时", "产出课时", "确认课时", "生产"];
+  const producedAliases = ["已确认课时", "实际生产课时", "实际生产", "生产课时", "实际课时", "实际产出", "已生产课时", "已产课时", "产出课时", "生产"];
   const weekAliases = ["周次", "周", "week"];
-  const find = (aliases: string[]): number => {
+  const find = (aliases: string[], exclude?: string[]): number => {
     for (let idx = 0; idx < header.length; idx++) {
       const t = norm(header[idx]);
       if (!t) continue;
+      if (exclude && exclude.some((e) => t.indexOf(e) >= 0)) continue;
       if (aliases.some((a) => t === a || t.indexOf(a) >= 0)) return idx;
     }
     return -1;
@@ -164,7 +165,7 @@ function matchColumns(header: string[]): Record<string, number> {
   const ta = find(teacherAbsentAliases); if (ta >= 0) map.teacherAbsent = ta;
   const sa = find(studentAbsentAliases); if (sa >= 0) map.studentAbsent = sa;
   const sch = find(scheduledAliases); if (sch >= 0) map.scheduled = sch;
-  const pr = find(producedAliases); if (pr >= 0) map.produced = pr;
+  const pr = find(producedAliases, ["未确认"]); if (pr >= 0) map.produced = pr;
   const wk = find(weekAliases); if (wk >= 0) map.week = wk;
   return map;
 }
