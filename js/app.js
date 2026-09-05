@@ -2934,11 +2934,17 @@
       if (cb && !errors.length) cb.addEventListener('click', () => {
         const ym = records.length ? (records[0].year + ' 年 ' + records[0].month + ' 月') : '';
         let n = 0;
+        let cleared = 0;
         records.forEach(r => {
+          // 月度数据（week=0）入库时，清理该科组当月已有的周度记录，避免月度预排/实际被重复累加
+          if (r.week === 0) {
+            const existing = STORE.list('kezuActual').filter(x => x.year === r.year && x.month === r.month && x.dimension === r.subject && x.week > 0);
+            existing.forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
+          }
           STORE.upsert({ stream: 'kezuActual', year: r.year, month: r.month, week: r.week, dimension: r.subject, values: { scheduled: r.scheduled, produced: r.produced }, importedAt: Date.now() });
           n++;
         });
-        toast(n + ' 条实际数据已入库（' + ym + '）');
+        toast(n + ' 条实际数据已入库（' + ym + '）' + (cleared ? '，并清理 ' + cleared + ' 条旧周度记录' : ''));
         pv.innerHTML = '';
         renderTrack();
       });
