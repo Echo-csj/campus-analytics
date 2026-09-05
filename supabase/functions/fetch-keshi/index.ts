@@ -30,7 +30,7 @@ function corsHeaders(origin?: string | null): Record<string, string> {
   const allow = env("KESHI_ALLOW_ORIGIN") || origin || "*";
   return {
     "Access-Control-Allow-Origin": allow,
-    "Access-Control-Allow-Headers": "authorization, x-keshi-secret, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, x-keshi-secret, content-type",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
     "Vary": "Origin",
   };
