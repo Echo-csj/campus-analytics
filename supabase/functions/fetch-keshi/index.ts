@@ -19,21 +19,29 @@
 // ─────────────────────────────────────────────────────────────────────
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 
-const FN_VERSION = "2026-09-05";
+const FN_VERSION = "2026-09-04b";
 
 function env(k: string, d = ""): string {
   return (Deno.env.get(k) || d).trim();
 }
 
 // ── CORS ──
-function corsHeaders(origin?: string | null): Record<string, string> {
+// 稳健做法：预检(OPTIONS)时把浏览器在 Access-Control-Request-Headers 里
+// 声明的请求头原样回显，避免逐个枚举 apikey / x-client-info 等（打地鼠）。
+function corsHeaders(req?: Request): Headers {
+  const origin = req ? req.headers.get("origin") : null;
   const allow = env("KESHI_ALLOW_ORIGIN") || origin || "*";
-  return {
-    "Access-Control-Allow-Origin": allow,
-    "Access-Control-Allow-Headers": "authorization, x-client-info, x-keshi-secret, content-type",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Vary": "Origin",
-  };
+  const requested = req ? req.headers.get("access-control-request-headers") : null;
+  const headers = new Headers();
+  headers.set("Access-Control-Allow-Origin", allow);
+  headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
+  headers.set(
+    "Access-Control-Allow-Headers",
+    requested || "authorization, x-client-info, apikey, x-keshi-secret, content-type",
+  );
+  headers.set("Access-Control-Max-Age", "86400");
+  headers.set("Vary", "Origin");
+  return headers;
 }
 
 // ── 极简 Cookie Jar（Deno fetch 不自动管理 cookie）──
@@ -110,23 +118,38 @@ function hasCaptcha(html: string): boolean {
 }
 
 // ── 表头列匹配（与前端 parseActualFile 对齐）──
+// 改进点：
+//  1) subject 优先匹配「名称」列（科组名称/学科组名称…）；找不到名称列时再退而求其次用「科组」等，
+//     避免把「科组代码」(纯数字) 误当成科组名。
+//  2) produced 别名扩充，覆盖「实际生产课时 / 实际课时 / 实际产出 / 已生产课时」等常见写法。
 function matchColumns(header: string[]): Record<string, number> {
   const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, "");
-  const aliases: Record<string, string[]> = {
-    subject: ["科组", "学科组", "学科", "科目", "subject"],
-    scheduled: ["预排课时", "实际预排", "预排", "排课课时", "排课", "周预排"],
-    produced: ["实际生产课时", "实际生产", "生产课时", "实际产出", "produced"],
-    week: ["周次", "周", "week"],
+  const subjectNameAliases = ["科组名称", "学科组名称", "教研组名称", "科组名", "学科组名", "小组名称", "科组长"];
+  const subjectBareAliases = ["科组", "学科组", "教研组", "学科", "科目"];
+  const scheduledAliases = ["预排课时", "实际预排课时", "实际预排", "预排", "排课课时", "计划课时", "应排课时", "排课", "周预排", "预排课时数"];
+  const producedAliases = ["实际生产课时", "实际生产", "生产课时", "实际课时", "实际产出", "已生产课时", "已产课时", "产出课时", "生产"];
+  const weekAliases = ["周次", "周", "week"];
+  const isCode = (t: string) => /代码|编码|编号|code|\bid\b/.test(t);
+  const find = (aliases: string[], skipCode = false): number => {
+    for (const cell of header) {
+      const t = norm(cell);
+      if (!t) continue;
+      if (skipCode && isCode(t)) continue;
+      if (aliases.some((a) => t === a || t.indexOf(a) >= 0)) return header.indexOf(cell);
+    }
+    return -1;
   };
   const map: Record<string, number> = {};
-  header.forEach((cell, idx) => {
-    const t = norm(cell);
-    if (!t) return;
-    for (const key in aliases) {
-      if (map[key] != null) continue;
-      if (aliases[key].some((a) => t === a || t.indexOf(a) >= 0)) { map[key] = idx; break; }
-    }
-  });
+  // subject：先名称列，找不到再退而求其次（含代码列，作为最后兜底）
+  const sIdx = find(subjectNameAliases);
+  if (sIdx >= 0) map.subject = sIdx;
+  else {
+    const b = find(subjectBareAliases);
+    if (b >= 0) map.subject = b;
+  }
+  const sch = find(scheduledAliases); if (sch >= 0) map.scheduled = sch;
+  const pr = find(producedAliases); if (pr >= 0) map.produced = pr;
+  const wk = find(weekAliases); if (wk >= 0) map.week = wk;
   return map;
 }
 function toNum(v: unknown): number {
@@ -204,16 +227,16 @@ async function login(base: Record<string, string>): Promise<{ ok: boolean; error
 
 // ── 主流程 ──
 async function handle(req: Request): Promise<Response> {
+  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(req), status: 204 });
   const origin = req.headers.get("origin");
-  if (req.method === "OPTIONS") return new Response(null, { headers: corsHeaders(origin), status: 204 });
   if (req.method !== "POST") {
-    return json({ ok: false, error: "仅支持 POST" }, 405, origin);
+    return json({ ok: false, error: "仅支持 POST" }, 405, req);
   }
   // 共享密钥校验
   const secret = env("KESHI_FETCH_SECRET");
   const provided = req.headers.get("x-keshi-secret") || "";
   if (secret && provided !== secret) {
-    return json({ ok: false, error: "未授权（共享密钥不符）" }, 403, origin);
+    return json({ ok: false, error: "未授权（共享密钥不符）" }, 403, req);
   }
 
   let body: any = {};
@@ -221,18 +244,18 @@ async function handle(req: Request): Promise<Response> {
   const month = String(body.month || "").trim();          // YYYY-MM
   const week = parseInt(body.week == null ? "0" : body.week, 10) || 0;
   const mm = month.match(/^(\d{4})-(\d{1,2})$/);
-  if (!mm) return json({ ok: false, error: "月份格式应为 YYYY-MM" }, 400, origin);
+  if (!mm) return json({ ok: false, error: "月份格式应为 YYYY-MM" }, 400, req);
   const year = +mm[1], mon = +mm[2];
 
   const baseUrl = env("KESHI_BASE_URL");
   const fixed = env("KESHI_FIXED_PARAMS");
-  if (!baseUrl) return json({ ok: false, error: "缺少 KESHI_BASE_URL 配置" }, 500, origin);
+  if (!baseUrl) return json({ ok: false, error: "缺少 KESHI_BASE_URL 配置" }, 500, req);
 
   const base: Record<string, string> = { "User-Agent": "Mozilla/5.0 (compatible; KeshiFetch/" + FN_VERSION + ")", "Accept": "text/html" };
 
   // 1) 登录（如需）
   const loginRes = await login(base);
-  if (!loginRes.ok) return json({ ok: false, error: loginRes.error }, 502, origin);
+  if (!loginRes.ok) return json({ ok: false, error: loginRes.error }, 502, req);
 
   // 2) 抓取数据页
   const params = new URLSearchParams();
@@ -247,13 +270,13 @@ async function handle(req: Request): Promise<Response> {
     ingestCookies(res);
     html = await res.text();
   } catch (e) {
-    return json({ ok: false, error: "抓取数据页失败：" + (e && (e as Error).message || String(e)) }, 502, origin);
+    return json({ ok: false, error: "抓取数据页失败：" + (e && (e as Error).message || String(e)) }, 502, req);
   }
 
   // 3) 解析表格
   const tables = extractTables(html);
   const errors: string[] = [];
-  const debug: string[] = ["fnVersion=" + FN_VERSION, "url=" + url, "tablesFound=" + tables.length];
+  const debug: string[] = ["fnVersion=" + FN_VERSION, "url=" + url, "origin=" + (origin || "-"), "tablesFound=" + tables.length];
   let chosen: string[][] | null = null;
   let headerMap: Record<string, number> | null = null;
   let chosenHeaderIdx = 0;
@@ -275,7 +298,14 @@ async function handle(req: Request): Promise<Response> {
     }
   });
   if (!chosen || !headerMap) {
-    return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", debug: debug.join("\n"), tablesFound: tables.length }, 422, origin);
+    return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", debug: debug.join("\n"), tablesFound: tables.length }, 422, req);
+  }
+  // 把选中表的表头与映射、以及前几行样本写入诊断，方便前端/用户核对列名
+  debug.push("chosenTableIdx=" + chosenTableIdx + " chosenHeaderIdx=" + chosenHeaderIdx);
+  debug.push("chosenHeaders=" + JSON.stringify(chosen[chosenHeaderIdx]));
+  debug.push("chosenMap=" + JSON.stringify(headerMap));
+  for (let i = chosenHeaderIdx + 1; i < Math.min(chosenHeaderIdx + 4, chosen.length); i++) {
+    debug.push("sampleRow[" + i + "]=" + JSON.stringify(chosen[i]));
   }
   const rows: any[] = [];
   for (let i = chosenHeaderIdx + 1; i < chosen.length; i++) {
@@ -293,13 +323,13 @@ async function handle(req: Request): Promise<Response> {
       produced: toNum(get("produced")),
     });
   }
-  return json({ ok: true, rows, errors, debug: debug.join("\n"), source: url, fnVersion: FN_VERSION, chosenTableIdx }, 200, origin);
+  return json({ ok: true, rows, errors, debug: debug.join("\n"), source: url, fnVersion: FN_VERSION, chosenTableIdx }, 200, req);
 }
 
-function json(obj: any, status: number, origin?: string | null): Response {
+function json(obj: any, status: number, req?: Request): Response {
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { ...corsHeaders(origin), "Content-Type": "application/json; charset=utf-8" },
+    headers: corsHeaders(req),
   });
 }
 
