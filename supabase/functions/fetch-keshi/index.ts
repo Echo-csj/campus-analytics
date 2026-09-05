@@ -82,6 +82,8 @@ function htmlDecode(s: string): string {
     .trim();
 }
 // 提取所有 <table> 为二维单元格（已去标签、解码）
+// 91paike 的「校区」列使用 rowspan，后续行会少一个单元格；这里把每行左侧补齐到
+// 该表最大列数，避免后续列整体左移导致 subject 读到数字列。
 function extractTables(html: string): string[][][] {
   const tables: string[][][] = [];
   const tre = /<table[\s\S]*?<\/table>/gi;
@@ -98,7 +100,14 @@ function extractTables(html: string): string[][][] {
       while ((cm = cre.exec(rm[0]))) cells.push(htmlDecode(cm[0]));
       if (cells.length) rows.push(cells);
     }
-    if (rows.length) tables.push(rows);
+    if (rows.length) {
+      const maxLen = Math.max(...rows.map((r) => r.length));
+      tables.push(rows.map((r) => {
+        if (r.length === maxLen) return r;
+        const pad = new Array(maxLen - r.length).fill("");
+        return [...pad, ...r];
+      }));
+    }
   }
   return tables;
 }
