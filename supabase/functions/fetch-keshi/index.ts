@@ -3,7 +3,10 @@
 // 91paike 科组课时统计 · 自动登录抓取（Supabase Edge Function / Deno）
 // 前端「科组生产指标 → 实际跟踪」面板点「拉取」→ 调用本函数 →
 // 本函数用存储在 Secrets 里的 91paike 账号密码自动登录，抓取 StatisticKeshi.aspx
-// 的月/周数据，解析表格为统一结构返回。密码不进前端、不进仓库。
+// 的【周度】数据（s_date_week=N，N≥1），解析表格为统一结构返回。
+//
+// 重要：只拉取周度数据，由前端把各周累加汇总为月度；不再拉取「月度汇总(week=0)」。
+// 密码不进前端、不进仓库。
 //
 // 所有敏感配置均通过 Supabase Secrets 设置（部署时 `supabase secrets set`）：
 //   KESHI_BASE_URL      数据页基址，如 http://zyg.91paike.com/StatisticKeshi.aspx
@@ -19,7 +22,7 @@
 // ─────────────────────────────────────────────────────────────────────
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 
-const FN_VERSION = "2026-09-05b";
+const FN_VERSION = "2026-09-06a";
 
 // 91paike「科目」→ 本校「科组」聚合规则（业务口径）
 // 数学=数学+生物；英语=英语；文综=语文+地理+历史+政治；理综=物理+化学
@@ -295,6 +298,8 @@ async function handle(req: Request): Promise<Response> {
   const week = parseInt(body.week == null ? "0" : body.week, 10) || 0;
   const mm = month.match(/^(\d{4})-(\d{1,2})$/);
   if (!mm) return json({ ok: false, error: "月份格式应为 YYYY-MM" }, 400, req);
+  // 只拉周度数据（week ≥ 1），不再拉「月度汇总(week=0)」——月度由前端把各周累加得出。
+  if (week < 1) return json({ ok: false, error: "请拉取周度数据（week ≥ 1），不要拉取月度汇总；周次填 1 即第 1 周。" }, 400, req);
   const year = +mm[1], mon = +mm[2];
 
   const baseUrl = env("KESHI_BASE_URL");

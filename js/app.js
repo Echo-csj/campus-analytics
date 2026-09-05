@@ -2550,8 +2550,9 @@
           <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。</div>
           <div class="meta-row">
             <div class="field"><label>月份</label><input id="atKeshiMonth" class="mono" value="2026-09" style="width:120px" placeholder="YYYY-MM"></div>
-            <div class="field"><label>周次（0=月度汇总）</label><input id="atKeshiWeek" class="mono" value="0" style="width:90px"></div>
-            <button class="btn primary" id="atKeshiBtn">🛰 拉取</button>
+            <div class="field"><label>周次（1=第1周…）</label><input id="atKeshiWeek" class="mono" value="1" style="width:90px"></div>
+            <button class="btn primary" id="atKeshiBtn">🛰 拉取本周</button>
+            <button class="btn" id="atKeshiAllBtn">🛰 拉取全部周次</button>
             <span class="preview-note" id="atKeshiNote"></span>
           </div>
         </div>
@@ -2933,18 +2934,20 @@
       const cb = $('#at_confirm');
       if (cb && !errors.length) cb.addEventListener('click', () => {
         const ym = records.length ? (records[0].year + ' 年 ' + records[0].month + ' 月') : '';
+        // 周度数据逐周累加；月度由系统把各周求和得出（actualSummary 跨周汇总）。
+        const months = new Set(records.map(r => r.year + '-' + r.month));
         let n = 0;
-        let cleared = 0;
         records.forEach(r => {
-          // 月度数据（week=0）入库时，清理该科组当月已有的周度记录，避免月度预排/实际被重复累加
-          if (r.week === 0) {
-            const existing = STORE.list('kezuActual').filter(x => x.year === r.year && x.month === r.month && x.dimension === r.subject && x.week > 0);
-            existing.forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
-          }
           STORE.upsert({ stream: 'kezuActual', year: r.year, month: r.month, week: r.week, dimension: r.subject, values: { scheduled: r.scheduled, produced: r.produced }, importedAt: Date.now() });
           n++;
         });
-        toast(n + ' 条实际数据已入库（' + ym + '）' + (cleared ? '，并清理 ' + cleared + ' 条旧周度记录' : ''));
+        // 迁移清理：删除该月旧的「月度汇总(week=0)」记录，避免与新周度数据重复累加
+        let cleared = 0;
+        months.forEach(k => {
+          const p = k.split('-'); const yy = +p[0], mm = +p[1];
+          STORE.list('kezuActual').filter(x => x.year === yy && x.month === mm && x.week === 0).forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
+        });
+        toast(n + ' 条周度实际数据已入库（' + ym + '）' + (cleared ? '，并清理 ' + cleared + ' 条旧月度汇总记录' : ''));
         pv.innerHTML = '';
         renderTrack();
       });
@@ -3057,12 +3060,18 @@
       });
       // 从 91paike 系统拉取（自动登录抓取）
       const keshiBtn = $('#atKeshiBtn');
+      const keshiAllBtn = $('#atKeshiAllBtn');
+      // 默认填充当前月份与第 1 周
+      {
+        const km = $('#atKeshiMonth'); if (km) { const d = new Date(); km.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
+        const kw = $('#atKeshiWeek'); if (kw) kw.value = '1';
+      }
       if (keshiBtn) keshiBtn.addEventListener('click', async () => {
         const month = ($('#atKeshiMonth').value || '').trim();
         const week = parseInt($('#atKeshiWeek').value, 10) || 0;
         const note = $('#atKeshiNote');
         if (!/^\d{4}-\d{2}$/.test(month)) { toast('月份格式应为 YYYY-MM（如 2026-09）'); return; }
-        keshiBtn.disabled = true;
+        keshiBtn.disabled = true; if (keshiAllBtn) keshiAllBtn.disabled = true;
         if (note) note.textContent = '拉取中…';
         try {
           const resp = await callKeshiFetch(month, week);
@@ -3076,7 +3085,43 @@
           if (note) note.innerHTML = '<span class="warn-cell">拉取失败：' + esc(msg) + '</span>';
           toast('拉取失败：' + msg);
         } finally {
-          keshiBtn.disabled = false;
+          keshiBtn.disabled = false; if (keshiAllBtn) keshiAllBtn.disabled = false;
+        }
+      });
+      // 拉取全部周次：逐周循环 week=1..5，遇空周或报错即止；合并后预览
+      if (keshiAllBtn) keshiAllBtn.addEventListener('click', async () => {
+        const month = ($('#atKeshiMonth').value || '').trim();
+        const note = $('#atKeshiNote');
+        if (!/^\d{4}-\d{2}$/.test(month)) { toast('月份格式应为 YYYY-MM（如 2026-09）'); return; }
+        keshiBtn.disabled = true; keshiAllBtn.disabled = true;
+        if (note) note.textContent = '逐周拉取中…（第 1 周）';
+        try {
+          const all = [], errs = [], dbg = [];
+          for (let w = 1; w <= 5; w++) {
+            if (note) note.textContent = '逐周拉取中…（第 ' + w + ' 周）';
+            const resp = await callKeshiFetch(month, w);
+            if (!resp || resp.error) { errs.push('第' + w + '周：' + ((resp && resp.error && (resp.error.message || resp.error)) || '云端调用失败')); break; }
+            const data = resp.data || {};
+            if (!data.ok) { errs.push('第' + w + '周：' + (data.error || '返回失败')); break; }
+            (data.errors || []).forEach(e => errs.push('第' + w + '周：' + e));
+            const rows = data.rows || [];
+            if (!rows.length) break; // 该周无数据，视为已到月末
+            dbg.push(data.debug || '');
+            all.push(...rows);
+          }
+          if (!all.length && !errs.length) {
+            if (note) note.textContent = '暂无可拉取的周度数据（该月可能还未产生周度记录）';
+            toast('暂无可拉取的周度数据');
+          } else {
+            renderActualPreview({ records: all, errors: errs, debug: dbg.join('\n\n') });
+            if (note) note.textContent = '已拉取 ' + all.length + ' 条（含多周，请核对后点「确认入库」）';
+          }
+        } catch (e) {
+          const msg = (e && e.message) || String(e);
+          if (note) note.innerHTML = '<span class="warn-cell">拉取失败：' + esc(msg) + '</span>';
+          toast('拉取失败：' + msg);
+        } finally {
+          keshiBtn.disabled = false; keshiAllBtn.disabled = false;
         }
       });
     }
