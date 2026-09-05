@@ -1,0 +1,7 @@
+# Supabase 项目配置（用于部署 Edge Function）
+# 项目已在 Supabase 控制台创建，ref 如下；本地只需 `supabase link --project-ref <ref>` 即可部署函数。
+project_id = "zxemcyngesgxpbevdxsu"
+
+[functions.fetch-keshi]
+# 用我们自己的共享密钥(x-keshi-secret)鉴权，不依赖 Supabase JWT
+verify_jwt = false

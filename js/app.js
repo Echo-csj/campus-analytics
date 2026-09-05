@@ -1638,6 +1638,25 @@
   function getMonthlyRecords() {
     return STORE.list('monthly');
   }
+
+  // 调用 Supabase Edge Function（fetch-keshi）自动登录抓取 91paike 科组实际数据。
+  // 返回 { data, error }（与 supabase-js functions.invoke 一致）；data = { ok, rows, errors }。
+  async function callKeshiFetch(month, week) {
+    const cfg = global.APP_CONFIG || {};
+    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
+      throw new Error('未配置 Supabase（config.js 缺少 SUPABASE_URL / ANON_KEY）');
+    }
+    if (!global.supabase || !global.supabase.createClient) {
+      throw new Error('Supabase SDK 未加载，请刷新页面或检查网络');
+    }
+    const client = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    const secret = cfg.KESHI_FETCH_SECRET || '';
+    const fn = cfg.KESHI_FUNCTION || 'fetch-keshi';
+    return client.functions.invoke(fn, {
+      body: { month: month, week: week },
+      headers: secret ? { 'x-keshi-secret': secret } : {},
+    });
+  }
   // 将派生得到的月度记录写入 monthly 流（year-month-week0 为主键，与 weekly 流互不干扰）
   function materializeMonthly(rec) {
     STORE.upsert({
@@ -2526,6 +2545,16 @@
         <div class="meta-row" style="margin-bottom:10px">
           <div class="field"><label>跟踪月份（预测月 = 参考月 + 1）</label><span id="atYM" class="mono" style="font-weight:600"></span></div>
         </div>
+        <div class="panel-sub" style="margin-bottom:12px;border:1px dashed #c7d2fe;background:#eef2ff;padding:10px 12px;border-radius:10px">
+          <div class="panel-title" style="margin-bottom:4px">🛰 从 91paike 系统拉取（自动登录）</div>
+          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。</div>
+          <div class="meta-row">
+            <div class="field"><label>月份</label><input id="atKeshiMonth" class="mono" value="2026-09" style="width:120px" placeholder="YYYY-MM"></div>
+            <div class="field"><label>周次（0=月度汇总）</label><input id="atKeshiWeek" class="mono" value="0" style="width:90px"></div>
+            <button class="btn primary" id="atKeshiBtn">🛰 拉取</button>
+            <span class="preview-note" id="atKeshiNote"></span>
+          </div>
+        </div>
         <div class="upload-bar" id="at_drop">
           <div class="ub-left">
             <div class="ub-ico" id="at_ubico">${UPLOAD_SVG}</div>
@@ -3016,6 +3045,30 @@
           list.forEach(r => STORE.remove('kezuActual', r.year, r.month, r.week, r.dimension));
           toast('已清空本月实际数据');
           renderTrack();
+        }
+      });
+      // 从 91paike 系统拉取（自动登录抓取）
+      const keshiBtn = $('#atKeshiBtn');
+      if (keshiBtn) keshiBtn.addEventListener('click', async () => {
+        const month = ($('#atKeshiMonth').value || '').trim();
+        const week = parseInt($('#atKeshiWeek').value, 10) || 0;
+        const note = $('#atKeshiNote');
+        if (!/^\d{4}-\d{2}$/.test(month)) { toast('月份格式应为 YYYY-MM（如 2026-09）'); return; }
+        keshiBtn.disabled = true;
+        if (note) note.textContent = '拉取中…';
+        try {
+          const resp = await callKeshiFetch(month, week);
+          if (!resp || resp.error) throw new Error((resp && resp.error && (resp.error.message || resp.error)) || '云端函数调用失败');
+          const data = resp.data || {};
+          if (!data.ok) throw new Error(data.error || '云端函数返回失败');
+          renderActualPreview({ records: data.rows || [], errors: data.errors || [], warnings: [] });
+          if (note) note.textContent = '已拉取 ' + (data.rows ? data.rows.length : 0) + ' 条（请核对后点「确认入库」）';
+        } catch (e) {
+          const msg = (e && e.message) || String(e);
+          if (note) note.innerHTML = '<span class="warn-cell">拉取失败：' + esc(msg) + '</span>';
+          toast('拉取失败：' + msg);
+        } finally {
+          keshiBtn.disabled = false;
         }
       });
     }
