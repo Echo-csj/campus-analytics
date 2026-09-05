@@ -1665,6 +1665,32 @@
     });
   }
 
+  // 给定自然月，枚举其「人工月」下真正属于该月的每一周（Mon–Sun），并映射到 91paike 实际的
+  // 月份/周次（91paike 按自然月标注周次，跨月溢出周会被标到下月第 1 周）。
+  // 规则（用户权威口径）：周度=自然周(Mon–Sun)，周日为周/月最后一天；
+  //   自然月最后一天在当周周二及之前→该周归上月；周三及之后→该周归本月。
+  // 返回 [{src:{y,m,w}, attr:{y,mo,wk}}]：src=向云端请求的 91paike 月份/周次，attr=按规则重归并后的归属。
+  function attributedWeeksForMonth(Y, m) {
+    // 人工月首周一 = 上月人工月最后周日 + 1；人工月最后周日 = manualLastDay(本月)
+    let pY = Y, pm = m - 1; if (pm < 1) { pm = 12; pY--; }
+    const prevML = AGG.manualLastDay(pY, pm);
+    const MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
+    const ML = AGG.manualLastDay(Y, m);
+    const list = [];
+    let wk = 0;
+    for (let d = new Date(MS); d <= ML; d.setDate(d.getDate() + 7)) {
+      wk++;
+      const sun = new Date(d); sun.setDate(sun.getDate() + 6); // 该周周日
+      const sy = sun.getFullYear(), sm = sun.getMonth() + 1;
+      const first = new Date(sy, sm - 1, 1);
+      let fd = new Date(first);
+      while (fd.getDay() !== 0) fd.setDate(fd.getDate() + 1); // 该自然月第一个周日
+      const srcW = Math.round((sun - fd) / 86400000) / 7 + 1;
+      list.push({ src: { y: sy, m: sm, w: srcW }, attr: { y: Y, mo: m, wk: wk } });
+    }
+    return list;
+  }
+
   function renderKezuTargetDash() {
     function actualSummary(py, pm, uptoWeek) {
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
@@ -2547,7 +2573,7 @@
         </div>
         <div class="panel-sub" style="margin-bottom:12px;border:1px dashed #c7d2fe;background:#eef2ff;padding:10px 12px;border-radius:10px">
           <div class="panel-title" style="margin-bottom:4px">🛰 从 91paike 系统拉取（自动登录）</div>
-          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。</div>
+          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。「拉取全部周次」按人工月规则（周度为自然周、周日为周/月最后一天；自然月最后一天在周三及之后则该周归本月）自动拉取当月全部周次，并把跨月到下月的溢出周归并回本月。</div>
           <div class="meta-row">
             <div class="field"><label>月份</label><input id="atKeshiMonth" class="mono" value="2026-09" style="width:120px" placeholder="YYYY-MM"></div>
             <div class="field"><label>周次（1=第1周…）</label><input id="atKeshiWeek" class="mono" value="1" style="width:90px"></div>
@@ -3088,23 +3114,27 @@
           keshiBtn.disabled = false; if (keshiAllBtn) keshiAllBtn.disabled = false;
         }
       });
-      // 拉取全部周次：逐周循环 week=1..5，遇空周或报错即止；合并后预览
+      // 拉取全部周次：按人工月规则算出本月应含的各周（含跨月溢出周归并），逐周拉取后合并预览
       if (keshiAllBtn) keshiAllBtn.addEventListener('click', async () => {
         const month = ($('#atKeshiMonth').value || '').trim();
         const note = $('#atKeshiNote');
-        if (!/^\d{4}-\d{2}$/.test(month)) { toast('月份格式应为 YYYY-MM（如 2026-09）'); return; }
+        const mm = month.match(/^(\d{4})-(\d{1,2})$/);
+        if (!mm) { toast('月份格式应为 YYYY-MM（如 2026-09）'); return; }
+        const Y = +mm[1], M = +mm[2];
+        const plan = attributedWeeksForMonth(Y, M);
         keshiBtn.disabled = true; keshiAllBtn.disabled = true;
-        if (note) note.textContent = '逐周拉取中…（第 1 周）';
+        if (note) note.textContent = '逐周拉取中…（共 ' + plan.length + ' 周）';
         try {
           const all = [], errs = [], dbg = [];
-          for (let w = 1; w <= 5; w++) {
-            if (note) note.textContent = '逐周拉取中…（第 ' + w + ' 周）';
-            const resp = await callKeshiFetch(month, w);
-            if (!resp || resp.error) { errs.push('第' + w + '周：' + ((resp && resp.error && (resp.error.message || resp.error)) || '云端调用失败')); break; }
+          for (let i = 0; i < plan.length; i++) {
+            const step = plan[i];
+            if (note) note.textContent = '逐周拉取中…（第 ' + (i + 1) + '/' + plan.length + ' 周，源 ' + step.src.y + '-' + String(step.src.m).padStart(2, '0') + ' 第' + step.src.w + '周）';
+            const resp = await callKeshiFetch(step.src.y + '-' + String(step.src.m).padStart(2, '0'), step.src.w);
+            if (!resp || resp.error) { errs.push('第' + (i + 1) + '步：' + ((resp && resp.error && (resp.error.message || resp.error)) || '云端调用失败')); break; }
             const data = resp.data || {};
-            if (!data.ok) { errs.push('第' + w + '周：' + (data.error || '返回失败')); break; }
-            (data.errors || []).forEach(e => errs.push('第' + w + '周：' + e));
-            const rows = data.rows || [];
+            if (!data.ok) { errs.push('第' + (i + 1) + '步：' + (data.error || '返回失败')); break; }
+            (data.errors || []).forEach(e => errs.push('第' + (i + 1) + '步：' + e));
+            const rows = (data.rows || []).map(r => ({ ...r, year: step.attr.y, month: step.attr.mo, week: step.attr.wk }));
             if (!rows.length) break; // 该周无数据，视为已到月末
             dbg.push(data.debug || '');
             all.push(...rows);
@@ -3114,7 +3144,7 @@
             toast('暂无可拉取的周度数据');
           } else {
             renderActualPreview({ records: all, errors: errs, debug: dbg.join('\n\n') });
-            if (note) note.textContent = '已拉取 ' + all.length + ' 条（含多周，请核对后点「确认入库」）';
+            if (note) note.textContent = '已拉取 ' + all.length + ' 条（' + plan.length + ' 周，含跨月溢出周归并）';
           }
         } catch (e) {
           const msg = (e && e.message) || String(e);
