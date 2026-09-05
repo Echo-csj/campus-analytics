@@ -2559,12 +2559,13 @@
         </div>
         <div class="panel-sub" style="margin-bottom:12px;border:1px dashed #c7d2fe;background:#eef2ff;padding:10px 12px;border-radius:10px">
           <div class="panel-title" style="margin-bottom:4px">🛰 从 91paike 系统拉取（自动登录）</div>
-          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。「拉取全部周次」按人工月规则（周度为自然周、周日为周/月最后一天；自然月最后一天在周三及之后则该周归本月）自动拉取当月全部周次，并把跨月到下月的溢出周归并回本月。</div>
+          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。「拉取全部周次」按人工月规则（周度为自然周、周日为周/月最后一天；页面按「周日所属自然月」标注周次，跨月溢出周归属下月第 1 周，故 9 月只有 1–4 周）自动拉取当月全部周次。</div>
           <div class="meta-row">
             <div class="field"><label>月份</label><input id="atKeshiMonth" class="mono" value="2026-09" style="width:120px" placeholder="YYYY-MM"></div>
             <div class="field"><label>周次（1=第1周…）</label><input id="atKeshiWeek" class="mono" value="1" style="width:90px"></div>
             <button class="btn primary" id="atKeshiBtn">🛰 拉取本周</button>
             <button class="btn" id="atKeshiAllBtn">🛰 拉取全部周次</button>
+            <button class="btn ghost" id="atCleanBtn" title="清除旧版误存的「溢出周」（如 9 月第 5 周）脏数据，避免污染月度预排/实际求和">🧹 清理溢出周</button>
             <span class="preview-note" id="atKeshiNote"></span>
           </div>
         </div>
@@ -2953,11 +2954,15 @@
           STORE.upsert({ stream: 'kezuActual', year: r.year, month: r.month, week: r.week, dimension: r.subject, values: { scheduled: r.scheduled, produced: r.produced }, importedAt: Date.now() });
           n++;
         });
-        // 迁移清理：删除该月旧的「月度汇总(week=0)」记录，避免与新周度数据重复累加
+        // 迁移清理：删除该月脏数据，避免污染「月度预排 / 月度实际」逐周求和：
+        //  (1) 旧的「月度汇总(week=0)」记录（旧版曾把月度单独存一条 week=0，会与周度累加重复）；
+        //  (2) 溢出周（week > 当月实际周数 N）——旧版人工月规则（周三/周二切割）产生的 phantom 周
+        //      （如 9 月第 5 周，实为 10 月第 1 周）。人工月已对齐拉取页面（9 月只有 1–4 周），week>N 一律脏数据。
         let cleared = 0;
         months.forEach(k => {
           const p = k.split('-'); const yy = +p[0], mm = +p[1];
-          STORE.list('kezuActual').filter(x => x.year === yy && x.month === mm && x.week === 0).forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
+          const N = AGG.manualMonthWeekCount(yy, mm);
+          STORE.list('kezuActual').filter(x => x.year === yy && x.month === mm && (x.week === 0 || x.week > N)).forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
         });
         toast(n + ' 条周度实际数据已入库（' + ym + '）' + (cleared ? '，并清理 ' + cleared + ' 条旧月度汇总记录' : ''));
         pv.innerHTML = '';
@@ -3139,6 +3144,20 @@
         } finally {
           keshiBtn.disabled = false; keshiAllBtn.disabled = false;
         }
+      });
+      // 清理旧版误存的「溢出周」脏数据（week=0 或 week>当月实际周数 N），避免污染月度预排/实际求和
+      const cleanBtn = $('#atCleanBtn');
+      if (cleanBtn) cleanBtn.addEventListener('click', () => {
+        const all = STORE.list('kezuActual');
+        const Nof = {};
+        all.forEach(r => { const k = r.year + '-' + r.month; if (!(k in Nof)) Nof[k] = AGG.manualMonthWeekCount(r.year, r.month); });
+        let n = 0;
+        all.forEach(r => {
+          const N = Nof[r.year + '-' + r.month];
+          if (r.week === 0 || (N != null && r.week > N)) { STORE.remove('kezuActual', r.year, r.month, r.week, r.dimension); n++; }
+        });
+        toast(n ? ('已清理 ' + n + ' 条溢出周/脏数据，下方月度汇总已刷新') : '无溢出周脏数据，数据干净 ✅');
+        renderTrack();
       });
     }
   }
