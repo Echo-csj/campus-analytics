@@ -7,8 +7,8 @@ window.APP_CONFIG = {
   SUPABASE_ANON_KEY: 'sb_publishable_b3iWR8Dd4Gng8PEeI98IWg_1cHuB2Dt',
   APP_NAME: 'campus-analytics',
   // 91paike 自动拉取：与云端函数 fetch-keshi 约定的共享密钥（仅作防滥用闸门，非敏感密码）。
-  // 需与 Supabase Secret KESHI_FETCH_SECRET 设为相同值；可由 `supabase secrets set KESHI_FETCH_SECRET=...` 设定。
-  KESHI_FETCH_SECRET: '',
+  // 已与 Supabase Secret KESHI_FETCH_SECRET 统一设为下方值；部署时 secrets set 用同一串即可。
+  KESHI_FETCH_SECRET: 'keshigate-8d2f4a1c9b3e',
   KESHI_FUNCTION: 'fetch-keshi'
 };
 
