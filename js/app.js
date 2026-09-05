@@ -1276,7 +1276,7 @@
   // 清理异常周次：按 (campus,year,month) 分组，删除周序号 > 当月合理最大周数(legitMaxWeek) 的脏周报记录。
   // legitMaxWeek 以模板「当月周数」(totalWeeksOfMonth) 为权威上限，故误标为第5/6周的月末周报会被判定为脏数据并删除。
   function cleanupStrayWeeks() {
-    const rs = STORE.list('weekly');
+    const rs = CA.overrides.rawRecords('weekly');
     const groups = {};
     rs.forEach(r => { const k = (r.campus || '泉山') + '|' + r.year + '|' + r.month; (groups[k] = groups[k] || []).push(r); });
     const toRemove = [];
@@ -1296,7 +1296,7 @@
   }
 
   function renderCmpCompare() {
-    const recs = STORE.list('weekly');
+    const recs = CA.overrides.rawRecords('weekly'); // 原始上传清单（诊断 / 回填用）
     const monthly = getMonthlyRecords();
     const years = AGG.yearOptions(monthly);
     const yr = years.length ? Math.max(...years) : new Date().getFullYear();
@@ -1397,7 +1397,7 @@
     let records = 0, fields = 0, added = 0, noRows = 0, withUnmatched = 0, rekeyed = 0;
     const details = [];
     ['weekly', 'monthly'].forEach(stream => {
-      STORE.list(stream).forEach(r => {
+      CA.overrides.rawRecords(stream).forEach(r => {
         records++;
         if (!r.rows || !r.rows.length) {
           // 无原始行：若 values 中已有 weekSeq 且与入库 week 不符，仍可直接重定周（提升修复覆盖率）
@@ -1468,7 +1468,7 @@
     const logEl = $('#monthlyUploadLog');
     if (!btn) return;
     btn.addEventListener('click', () => {
-      const weekly = STORE.list('weekly');
+      const weekly = CA.overrides.rawRecords('weekly'); // 派生应基于原始周报（weekSeq 口径）
       if (!weekly.length) { toast('尚无周报数据，请先在下方「历史周报批量入库」上传 DOS 周报'); return; }
       const derived = AGG.materializeMonthlyFromWeekly(weekly);
       if (!derived.length) {
@@ -3042,12 +3042,186 @@
     });
   }
 
+  // —— 数据修正中心（档A：引导式修正规则 + 自动诊断）——
+  // 修正以「规则」形式持久化（ca_overrides_v1），在读取 / 聚合时由 CA.applyOverrides 即插即用套用，
+  // 不改动原始上传数据。本面板提供自动诊断 + 引导式建规则。
+  function renderFixCenter() {
+    const OV = CA.overrides;
+    const STREAMS = ['weekly', 'monthly', 'bestkezu', 'bestkezu_score', 'kezuActual', 'kezuTargetC', 'tkpi', 'kpi'];
+
+    // 记录身份标签：stream|campus|year|month|week|dimension
+    function recKey(r) { return [r.stream, r.campus || '泉山', r.year, r.month, r.week, r.dimension || '_'].join('|'); }
+    function recLabel(r) {
+      const v1 = r.values && r.values.v1Students != null ? '（1V1=' + r.values.v1Students + '）' : '';
+      return (r.campus || '泉山') + ' · ' + r.year + '-' + (r.month < 10 ? '0' + r.month : r.month) +
+        ' 第' + (r.week || 0) + '周' + (r.dimension && r.dimension !== '_' ? ' [' + r.dimension + ']' : '') + v1;
+    }
+    // 字段候选（周报数值字段，供字段值修正引导）
+    const FIELDS = (CA.SCHEMA && CA.SCHEMA.weeklyFields ? CA.SCHEMA.weeklyFields.map(x => x.key) : [])
+      .concat(['v1MonthProduced', 'v6MonthProduced', 'monthCash', 'xfMonthNum', 'coreTeacherRatio', 'monthEff', 'monthSaturation'])
+      .filter((v, i, a) => a.indexOf(v) === i);
+
+    function refresh() { renderFixCenter(); }
+
+    function addRule(rule) {
+      OV.add(rule);
+      toast('已添加修正规则，即时生效');
+      refresh();
+    }
+
+    // —— 自动诊断：检测"异常周次"（week > 当月合理最大周数 legitMaxWeek）——
+    const weekly = OV.rawRecords('weekly');
+    const groups = {};
+    weekly.forEach(r => { const k = (r.campus || '泉山') + '|' + r.year + '|' + r.month; (groups[k] = groups[k] || []).push(r); });
+    const suggestions = [];
+    Object.keys(groups).forEach(k => {
+      const g = groups[k];
+      const legitMax = legitMaxWeek(g);
+      g.forEach(r => { if ((r.week || 0) > legitMax) suggestions.push({ r, legitMax }); });
+    });
+
+    // 当前对账容差（%）
+    const tolPct = Math.round(OV.tolerance('linkage') * 10000) / 100;
+
+    // —— 规则列表 ——
+    const rules = OV.all();
+    const ruleRows = rules.length ? rules.slice().reverse().map(r => {
+      let desc = '';
+      if (r.type === 'weekRemap') desc = '周次重映射：' + recLabel(r) + ' → 第' + r.to + '周';
+      else if (r.type === 'ignore') desc = '忽略记录：' + recLabel(r);
+      else if (r.type === 'fieldOverride') desc = '字段值修正：' + recLabel(r) + ' 的 ' + r.field + ' = ' + r.value + (r.asNumber === false ? '（文本）' : '');
+      else if (r.type === 'tolerance') desc = '对账容差：' + (r.scope || '全部') + ' = ' + (r.value * 100).toFixed(2) + '%';
+      return '<tr><td>' + esc(desc) + '</td><td style="white-space:nowrap"><button class="btn ghost sm" data-del="' + r.id + '">删除</button></td></tr>';
+    }).join('') : '<tr><td colspan="2" class="preview-note">暂无修正规则。下方诊断或手动添加后即可生效。</td></tr>';
+
+    let html = '';
+    html += '<div class="panel"><div class="panel-title">数据修正中心 · 自动诊断</div>';
+    html += '<div class="panel-desc">系统扫描周报数据，自动发现"异常周次"（周序号超出该月模板「当月周数」的脏周报，如月末周误存为第 5 周）。这类数据会污染「周报对比」、产生幻影周次、并导致科组预测 1V1 人数取错。你可一键将其<b>重映射到正确周次</b>（不删原始数据）。</div>';
+    if (suggestions.length) {
+      html += '<div class="uc-log" style="margin-top:8px">' +
+        suggestions.map((s, i) => '• ' + esc(recLabel(s.r)) + ' ⇒ 建议映射到 <b>第' + s.legitMax + '周</b>').join('<br>') + '</div>';
+      html += '<div class="row" style="align-items:center;gap:10px;margin-top:10px"><button class="btn primary" id="fixApplyAll">✓ 全部应用重映射</button>' +
+        '<span class="preview-note">共 ' + suggestions.length + ' 条异常周次</span></div>';
+    } else {
+      html += '<div class="uc-log ok-cell" style="margin-top:8px">✓ 未检测到异常周次，周报数据周次正常。</div>';
+    }
+    html += '</div>';
+
+    // —— 引导式建规则 ——
+    html += '<div class="panel" style="margin-top:18px"><div class="panel-title">引导式修正规则</div>';
+    html += '<div class="panel-desc">选择一条数据 + 修正方式，系统生成修正规则。规则在<b>读取 / 聚合时即插即用</b>套用，原始上传数据保持不变；可随时在下方"已生效规则"中删除。</div>';
+    html += '<div class="grid grid-2" style="margin-top:6px">';
+    html += '<div class="field"><label>数据类型</label><select id="fixStream" class="mono">' + STREAMS.map(s => '<option value="' + s + '">' + s + '</option>').join('') + '</select></div>';
+    html += '<div class="field"><label>选择数据记录</label><select id="fixRec" class="mono"></select></div>';
+    html += '</div>';
+    html += '<div class="field" style="margin-top:6px"><label>修正方式</label><select id="fixType" class="mono">' +
+      '<option value="weekRemap">周次重映射（改写到正确周次）</option>' +
+      '<option value="ignore">忽略该记录（读取时不参与计算）</option>' +
+      '<option value="fieldOverride">字段值修正（覆盖某字段）</option>' +
+      '</select></div>';
+    html += '<div id="fixExtra"></div>';
+    html += '<div class="row" style="margin-top:10px"><button class="btn primary" id="fixAdd">＋ 添加修正规则</button></div>';
+    html += '<datalist id="fixFieldList">' + FIELDS.map(f => '<option value="' + f + '">').join('') + '</datalist>';
+    html += '</div>';
+
+    // —— 对账容差 ——
+    html += '<div class="panel" style="margin-top:18px"><div class="panel-title">数据关联对账 · 容差</div>';
+    html += '<div class="panel-desc">「数据源」页的"数据关联对账（校区 ↔ 科组）"默认容差 1%。如两系统存在合理误差，可调高容差避免误报不一致。</div>';
+    html += '<div class="row" style="align-items:center;gap:10px;margin-top:6px">' +
+      '<div class="field" style="margin:0"><label>容差（%）</label><input type="number" id="fixTol" class="mono" min="0" step="0.1" value="' + tolPct + '" style="width:120px"></div>' +
+      '<button class="btn" id="fixTolBtn">保存容差</button>' +
+      '<span class="preview-note">当前：' + tolPct + '%</span></div></div>';
+
+    // —— 已生效规则 ——
+    html += '<div class="panel" style="margin-top:18px"><div class="panel-title">已生效规则（' + rules.length + '）</div>';
+    html += '<div class="table-wrap"><table><thead><tr><th>规则</th><th style="width:80px">操作</th></tr></thead><tbody id="fixRules">' + ruleRows + '</tbody></table></div>';
+    html += '<div class="panel-desc" style="margin-top:8px">提示：规则即时生效。切换到「核心看板 / 数据源 / 科组生产指标」等对应看板即可看到修正后的结果；原始数据不受影响。</div>';
+    html += '</div>';
+
+    $('#content').innerHTML = html;
+
+    // 记录下拉填充
+    const recSel = $('#fixRec');
+    function fillRecs() {
+      const stream = $('#fixStream').value;
+      const recs = OV.rawRecords(stream).slice().sort((a, b) => (b.year - a.year) || (b.month - a.month) || ((b.week || 0) - (a.week || 0)));
+      recSel.innerHTML = recs.map(r => '<option value="' + recKey(r) + '">' + esc(recLabel(r)) + '</option>').join('') || '<option value="">（该类型暂无数据）</option>';
+    }
+    function fillExtra() {
+      const type = $('#fixType').value;
+      const box = $('#fixExtra');
+      if (type === 'weekRemap') {
+        box.innerHTML = '<div class="field" style="margin-top:6px"><label>目标周次</label><input type="number" id="fixToWeek" class="mono" min="1" max="6" value="4" style="width:120px"></div>';
+      } else if (type === 'fieldOverride') {
+        box.innerHTML = '<div class="grid grid-2" style="margin-top:6px">' +
+          '<div class="field"><label>字段名</label><input id="fixField" class="mono" list="fixFieldList" placeholder="如 v1MonthProduced"></div>' +
+          '<div class="field"><label>修正值</label><input id="fixValue" class="mono"></div></div>' +
+          '<label class="check" style="margin-top:6px"><input type="checkbox" id="fixAsText"> 按文本保存（不转为数字）</label>';
+      } else {
+        box.innerHTML = '';
+      }
+    }
+    fillRecs(); fillExtra();
+    $('#fixStream').addEventListener('change', fillRecs);
+    $('#fixType').addEventListener('change', fillExtra);
+
+    // 全部应用重映射
+    const applyAll = $('#fixApplyAll');
+    if (applyAll) applyAll.addEventListener('click', () => {
+      if (!confirm('将对 ' + suggestions.length + ' 条异常周次添加"重映射"规则（不改原始数据），是否继续？')) return;
+      suggestions.forEach(s => OV.add({ type: 'weekRemap', stream: s.r.stream, campus: s.r.campus || '泉山', year: s.r.year, month: s.r.month, week: s.r.week, dimension: s.r.dimension || '_', to: s.legitMax, note: '自动诊断' }));
+      toast('已应用 ' + suggestions.length + ' 条重映射规则');
+      refresh();
+    });
+
+    // 添加单条规则
+    $('#fixAdd').addEventListener('click', () => {
+      const kv = recSel.value.split('|');
+      if (kv.length < 6 || !kv[0]) { toast('请先选择一条数据记录'); return; }
+      const base = { stream: kv[0], campus: kv[1], year: +kv[2], month: +kv[3], week: +kv[4], dimension: kv[5] || '_' };
+      const type = $('#fixType').value;
+      if (type === 'weekRemap') {
+        const to = parseInt($('#fixToWeek').value, 10);
+        if (!to || to < 1) { toast('请填写正确的目标周次'); return; }
+        if (to === base.week) { toast('目标周次与当前相同，无需修正'); return; }
+        addRule(Object.assign({ type: 'weekRemap', to, note: '手动' }, base));
+      } else if (type === 'ignore') {
+        if (!confirm('将忽略该记录（读取时不参与任何计算，但原始数据保留）。是否继续？')) return;
+        addRule(Object.assign({ type: 'ignore', note: '手动' }, base));
+      } else if (type === 'fieldOverride') {
+        const field = $('#fixField').value.trim();
+        const val = $('#fixValue').value;
+        if (!field) { toast('请填写字段名'); return; }
+        if (val === '' || val == null) { toast('请填写修正值'); return; }
+        const asText = $('#fixAsText') && $('#fixAsText').checked;
+        addRule(Object.assign({ type: 'fieldOverride', field, value: val, asNumber: !asText, note: '手动' }, base));
+      }
+    });
+
+    // 保存容差
+    $('#fixTolBtn').addEventListener('click', () => {
+      const pct = parseFloat($('#fixTol').value);
+      if (!isFinite(pct) || pct < 0) { toast('请填写有效的容差百分比'); return; }
+      OV.add({ type: 'tolerance', scope: 'linkage', value: pct / 100, note: '手动' });
+      toast('已保存对账容差 ' + pct + '%');
+      refresh();
+    });
+
+    // 删除规则
+    $all('#fixRules [data-del]').forEach(b => b.addEventListener('click', () => {
+      OV.remove(parseInt(b.getAttribute('data-del'), 10));
+      toast('已删除该规则');
+      refresh();
+    }));
+  }
+
   // —— 路由 ——
   const tabs = {
     kezu: { title: '最佳科组', render: renderKezu },
     target: { title: '科组生产指标', render: renderTarget },
     kpi: { title: '教师 KPI', render: renderKpi },
     compare: { title: '数据源', render: renderCompare },
+    fix: { title: '数据修正', render: renderFixCenter },
     dashboard: { title: '核心看板', render: renderDashboard },
     data: { title: '数据备份', render: renderData },
   };

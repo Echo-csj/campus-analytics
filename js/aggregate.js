@@ -696,7 +696,8 @@
     const actuals = get('kezuActual');
     const targetC = (CA.store.list('kezuTargetC') || []).filter(r => (r.campus || '泉山') === campus)[0];
     const num = v => (typeof v === 'number' && isFinite(v)) ? v : null;
-    const TOL = 0.01;
+    // 对账容差优先取「数据修正中心」配置的 tolerance 规则（档A），缺省 0.01
+    const TOL = (CA.overrides && typeof CA.overrides.tolerance === 'function') ? CA.overrides.tolerance('linkage') : 0.01;
     const kezuProd = actuals.reduce((s, r) => s + (num(r.values && r.values.produced) || 0), 0);
     const campusProd = monthly ? num(monthly.values.v1MonthProduced) : null;
     const kezuSched = actuals.reduce((s, r) => s + (num(r.values && r.values.scheduled) || 0), 0);

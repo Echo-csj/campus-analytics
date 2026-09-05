@@ -44,7 +44,14 @@
     return { overwrite, insert };
   }
 
+  // 读取时套用修正规则（档A 数据修正中心）：非破坏性，规则在 ca_overrides_v1。
+  // 无规则时 CA.applyOverrides 直接返回原数组，零开销。管理类功能请用 listRaw 取原始数据。
   function list(stream) {
+    const raw = readAll().filter(r => !stream || r.stream === stream);
+    return (typeof CA.applyOverrides === 'function') ? CA.applyOverrides(raw, stream) : raw;
+  }
+  // 原始记录读取（绕过修正规则），供回填 / 清理 / 修正中心 UI 等管理功能使用
+  function listRaw(stream) {
     return readAll().filter(r => !stream || r.stream === stream);
   }
   function remove(stream, year, month, week, dimension, campus) {
@@ -66,6 +73,6 @@
     return n;
   }
 
-  CA.store = { readAll, upsert, previewUpsert, list, remove, clearAll, exportJSON, importJSON };
+  CA.store = { readAll, upsert, previewUpsert, list, listRaw, remove, clearAll, exportJSON, importJSON };
 
 })(window);
