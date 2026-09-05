@@ -106,9 +106,9 @@ function hasCaptcha(html: string): boolean {
 function matchColumns(header: string[]): Record<string, number> {
   const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, "");
   const aliases: Record<string, string[]> = {
-    subject: ["科组", "学科", "科目", "subject"],
-    scheduled: ["实际预排", "预排", "排课", "计划课时", "预排课时", "预排生产"],
-    produced: ["实际生产", "生产课时", "实际生产课时", "实际产出", "produced"],
+    subject: ["科组", "学科组", "学科", "科目", "subject"],
+    scheduled: ["预排课时", "实际预排", "预排", "排课课时", "排课", "周预排"],
+    produced: ["实际生产课时", "实际生产", "生产课时", "实际产出", "produced"],
     week: ["周次", "周", "week"],
   };
   const map: Record<string, number> = {};
@@ -246,20 +246,32 @@ async function handle(req: Request): Promise<Response> {
   // 3) 解析表格
   const tables = extractTables(html);
   const errors: string[] = [];
+  const debug: string[] = ["fnVersion=" + FN_VERSION, "url=" + url, "tablesFound=" + tables.length];
   let chosen: string[][] | null = null;
   let headerMap: Record<string, number> | null = null;
-  for (const t of tables) {
+  let chosenHeaderIdx = 0;
+  let chosenTableIdx = -1;
+  let bestScore = 0;
+  tables.forEach((t, ti) => {
+    // 表内找「最佳表头行」：匹配列数最多的一行；数据从该行下一行起算
+    let bestMap: Record<string, number> | null = null;
+    let bestIdx = -1;
+    let bScore = 0;
     for (let i = 0; i < t.length; i++) {
       const m = matchColumns(t[i]);
-      if (m.subject != null && (m.scheduled != null || m.produced != null)) { chosen = t; headerMap = m; break; }
+      const sc = (m.subject != null ? 1 : 0) + (m.scheduled != null ? 1 : 0) + (m.produced != null ? 1 : 0);
+      if (sc > bScore) { bScore = sc; bestMap = m; bestIdx = i; }
     }
-    if (chosen) break;
-  }
+    debug.push("table[" + ti + "] rows=" + t.length + " bestHeaderIdx=" + bestIdx + " score=" + bScore + " headers=" + JSON.stringify(t[bestIdx] || []));
+    if (bestMap && bScore > bestScore) {
+      bestScore = bScore; chosen = t; headerMap = bestMap; chosenHeaderIdx = bestIdx; chosenTableIdx = ti;
+    }
+  });
   if (!chosen || !headerMap) {
-    return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", tablesFound: tables.length }, 422, origin);
+    return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", debug: debug.join("\n"), tablesFound: tables.length }, 422, origin);
   }
   const rows: any[] = [];
-  for (let i = 1; i < chosen.length; i++) { // 跳过第 0 行表头
+  for (let i = chosenHeaderIdx + 1; i < chosen.length; i++) {
     const row = chosen[i];
     if (!row.length || row.every((c) => c === "")) continue;
     const get = (k: string) => row[headerMap![k]];
@@ -274,7 +286,7 @@ async function handle(req: Request): Promise<Response> {
       produced: toNum(get("produced")),
     });
   }
-  return json({ ok: true, rows, errors, source: url, fnVersion: FN_VERSION }, 200, origin);
+  return json({ ok: true, rows, errors, debug: debug.join("\n"), source: url, fnVersion: FN_VERSION, chosenTableIdx }, 200, origin);
 }
 
 function json(obj: any, status: number, origin?: string | null): Response {

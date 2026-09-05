@@ -2919,14 +2919,16 @@
       }).catch(err => { pv.innerHTML = '<div class="preview-note warn-cell">解析失败：' + esc(err && err.message ? err.message : String(err)) + '</div>'; });
     }
     function renderActualPreview(res) {
-      const { records, errors } = res;
+      const { records, errors, debug } = res;
       const { y, m } = predictedYM();
+      const errs = (errors || []).map(e => (typeof e === 'string' ? e : (e && e.msg ? e.msg : String(e))));
       let h = '<div class="bk-validate">';
-      if (errors.length) h += '<div class="bk-err"><b>✕ 校验提示（' + errors.length + ' 项）</b><ul>' + errors.slice(0, 20).map(e => '<li>' + esc(e.msg) + '</li>').join('') + '</ul></div>';
+      if (errs.length) h += '<div class="bk-err"><b>✕ 校验提示（' + errs.length + ' 项）</b><ul>' + errs.slice(0, 20).map(e => '<li>' + esc(e) + '</li>').join('') + '</ul></div>';
       else h += '<div class="bk-ok">✓ 无错误</div>';
       h += '</div>';
-      h += '<div class="preview-note">已解析 <b>' + records.length + '</b> 条（预测月 = ' + y + ' 年 ' + m + ' 月；缺年份/月份自动填充）</div>';
-      h += '<div class="row" style="margin-top:10px"><button class="btn primary" id="at_confirm"' + (errors.length ? ' disabled' : '') + '>确认入库（' + records.length + ' 条）</button><button class="btn ghost" id="at_cancel">取消</button></div>';
+      h += '<div class="preview-note">已解析 <b>' + (records || []).length + '</b> 条（预测月 = ' + y + ' 年 ' + m + ' 月；缺年份/月份自动填充）</div>';
+      if (debug) h += '<details class="keshi-debug"><summary>🔍 抓取诊断（点开后全选复制，发给开发者排查）</summary><pre style="white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.5;max-height:220px;overflow:auto;background:#f5f5f7;padding:8px;border-radius:6px;margin-top:6px">' + esc(debug) + '</pre></details>';
+      h += '<div class="row" style="margin-top:10px"><button class="btn primary" id="at_confirm"' + (errs.length ? ' disabled' : '') + '>确认入库（' + (records || []).length + ' 条）</button><button class="btn ghost" id="at_cancel">取消</button></div>';
       const pv = $('#at_preview'); pv.innerHTML = h;
       const cb = $('#at_confirm');
       if (cb && !errors.length) cb.addEventListener('click', () => {
@@ -3061,7 +3063,7 @@
           if (!resp || resp.error) throw new Error((resp && resp.error && (resp.error.message || resp.error)) || '云端函数调用失败');
           const data = resp.data || {};
           if (!data.ok) throw new Error(data.error || '云端函数返回失败');
-          renderActualPreview({ records: data.rows || [], errors: data.errors || [], warnings: [] });
+          renderActualPreview({ records: data.rows || [], errors: data.errors || [], debug: data.debug || '' });
           if (note) note.textContent = '已拉取 ' + (data.rows ? data.rows.length : 0) + ' 条（请核对后点「确认入库」）';
         } catch (e) {
           const msg = (e && e.message) || String(e);
