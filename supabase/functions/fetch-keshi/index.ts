@@ -19,7 +19,16 @@
 // ─────────────────────────────────────────────────────────────────────
 import { serve } from "https://deno.land/std@0.208.0/http/server.ts";
 
-const FN_VERSION = "2026-09-04b";
+const FN_VERSION = "2026-09-05a";
+
+// 91paike「科目」→ 本校「科组」聚合规则（业务口径）
+// 数学=数学+生物；英语=英语；文综=语文+地理+历史+政治；理综=物理+化学
+const GROUP_RULES: Record<string, string[]> = {
+  "数学": ["数学", "生物"],
+  "英语": ["英语"],
+  "文综": ["语文", "地理", "历史", "政治"],
+  "理综": ["物理", "化学"],
+};
 
 function env(k: string, d = ""): string {
   return (Deno.env.get(k) || d).trim();
@@ -117,36 +126,34 @@ function hasCaptcha(html: string): boolean {
   return false;
 }
 
-// ── 表头列匹配（与前端 parseActualFile 对齐）──
-// 改进点：
-//  1) subject 优先匹配「名称」列（科组名称/学科组名称…）；找不到名称列时再退而求其次用「科组」等，
-//     避免把「科组代码」(纯数字) 误当成科组名。
-//  2) produced 别名扩充，覆盖「实际生产课时 / 实际课时 / 实际产出 / 已生产课时」等常见写法。
+// ── 表头列匹配 ──
+// 兼容两种表结构：
+//  1) 月度/周度 91paike 统计表：科目、总排课时、已确认课时、老师请假课时、学生请假课时
+//  2) 历史模板：科组、预排课时、实际生产课时
 function matchColumns(header: string[]): Record<string, number> {
   const norm = (s: string) => (s || "").trim().toLowerCase().replace(/\s+/g, "");
-  const subjectNameAliases = ["科组名称", "学科组名称", "教研组名称", "科组名", "学科组名", "小组名称", "科组长"];
-  const subjectBareAliases = ["科组", "学科组", "教研组", "学科", "科目"];
-  const scheduledAliases = ["预排课时", "实际预排课时", "实际预排", "预排", "排课课时", "计划课时", "应排课时", "排课", "周预排", "预排课时数"];
-  const producedAliases = ["实际生产课时", "实际生产", "生产课时", "实际课时", "实际产出", "已生产课时", "已产课时", "产出课时", "生产"];
+  const subjectAliases = ["科目", "科组名称", "学科组名称", "教研组名称", "科组名", "学科组名", "小组名称", "科组", "学科组", "教研组", "学科"];
+  // 月度表：总排课时 - 请假 = 预排
+  const totalScheduledAliases = ["总排课时", "应排课时", "计划课时", "排课课时", "排课"];
+  const teacherAbsentAliases = ["老师请假课时", "教师请假课时", "师请假课时", "教师请假"];
+  const studentAbsentAliases = ["学生请假课时", "生请假课时", "学生请假"];
+  // 模板式预排/生产（兼容历史）
+  const scheduledAliases = ["预排课时", "实际预排课时", "实际预排", "预排", "周预排", "预排课时数"];
+  const producedAliases = ["已确认课时", "实际生产课时", "实际生产", "生产课时", "实际课时", "实际产出", "已生产课时", "已产课时", "产出课时", "确认课时", "生产"];
   const weekAliases = ["周次", "周", "week"];
-  const isCode = (t: string) => /代码|编码|编号|code|\bid\b/.test(t);
-  const find = (aliases: string[], skipCode = false): number => {
-    for (const cell of header) {
-      const t = norm(cell);
+  const find = (aliases: string[]): number => {
+    for (let idx = 0; idx < header.length; idx++) {
+      const t = norm(header[idx]);
       if (!t) continue;
-      if (skipCode && isCode(t)) continue;
-      if (aliases.some((a) => t === a || t.indexOf(a) >= 0)) return header.indexOf(cell);
+      if (aliases.some((a) => t === a || t.indexOf(a) >= 0)) return idx;
     }
     return -1;
   };
   const map: Record<string, number> = {};
-  // subject：先名称列，找不到再退而求其次（含代码列，作为最后兜底）
-  const sIdx = find(subjectNameAliases);
-  if (sIdx >= 0) map.subject = sIdx;
-  else {
-    const b = find(subjectBareAliases);
-    if (b >= 0) map.subject = b;
-  }
+  const s = find(subjectAliases); if (s >= 0) map.subject = s;
+  const ts = find(totalScheduledAliases); if (ts >= 0) map.totalScheduled = ts;
+  const ta = find(teacherAbsentAliases); if (ta >= 0) map.teacherAbsent = ta;
+  const sa = find(studentAbsentAliases); if (sa >= 0) map.studentAbsent = sa;
   const sch = find(scheduledAliases); if (sch >= 0) map.scheduled = sch;
   const pr = find(producedAliases); if (pr >= 0) map.produced = pr;
   const wk = find(weekAliases); if (wk >= 0) map.week = wk;
@@ -155,6 +162,39 @@ function matchColumns(header: string[]): Record<string, number> {
 function toNum(v: unknown): number {
   const n = parseFloat(String(v == null ? "" : v).replace(/[, ]/g, ""));
   return isFinite(n) ? n : 0;
+}
+function isTotalRow(subject: string): boolean {
+  return /合计|总计|汇总|小计|total|sum/i.test(subject);
+}
+
+// 将原始「科目」行聚合为「科组」行
+function groupToKeshi(rawRows: any[]): { rows: any[]; groupErrors: string[] } {
+  const groups: Record<string, { year: number; month: number; week: number; scheduled: number; produced: number; sources: string[] }> = {};
+  const groupErrors: string[] = [];
+  for (const r of rawRows) {
+    const subject = String(r.subject || "").trim();
+    if (!subject || isTotalRow(subject)) continue;
+    const groupName = Object.entries(GROUP_RULES).find(([, subs]) => subs.includes(subject))?.[0];
+    if (!groupName) {
+      groupErrors.push("科目「" + subject + "」未匹配任何科组规则，已跳过");
+      continue;
+    }
+    if (!groups[groupName]) {
+      groups[groupName] = { year: r.year, month: r.month, week: r.week, scheduled: 0, produced: 0, sources: [] };
+    }
+    groups[groupName].scheduled += r.scheduled;
+    groups[groupName].produced += r.produced;
+    if (!groups[groupName].sources.includes(subject)) groups[groupName].sources.push(subject);
+  }
+  const rows = Object.entries(groups).map(([subject, g]) => ({
+    year: g.year,
+    month: g.month,
+    week: g.week,
+    subject,
+    scheduled: Math.round(g.scheduled * 100) / 100,
+    produced: Math.round(g.produced * 100) / 100,
+  }));
+  return { rows, groupErrors };
 }
 
 // ── 自动探测登录表单字段 ──
@@ -289,7 +329,9 @@ async function handle(req: Request): Promise<Response> {
     let bScore = 0;
     for (let i = 0; i < t.length; i++) {
       const m = matchColumns(t[i]);
-      const sc = (m.subject != null ? 1 : 0) + (m.scheduled != null ? 1 : 0) + (m.produced != null ? 1 : 0);
+      const sc = (m.subject != null ? 1 : 0) +
+        ((m.totalScheduled != null || m.scheduled != null) ? 1 : 0) +
+        (m.produced != null ? 1 : 0);
       if (sc > bScore) { bScore = sc; bestMap = m; bestIdx = i; }
     }
     debug.push("table[" + ti + "] rows=" + t.length + " bestHeaderIdx=" + bestIdx + " score=" + bScore + " headers=" + JSON.stringify(t[bestIdx] || []));
@@ -298,32 +340,53 @@ async function handle(req: Request): Promise<Response> {
     }
   });
   if (!chosen || !headerMap) {
-    return json({ ok: false, error: "未在页面找到含「科组/预排/生产」的表格，可能登录失效或页面结构变化。", debug: debug.join("\n"), tablesFound: tables.length }, 422, req);
+    return json({ ok: false, error: "未在页面找到含「科目/科组/预排/生产」的表格，可能登录失效或页面结构变化。", debug: debug.join("\n"), tablesFound: tables.length }, 422, req);
   }
-  // 把选中表的表头与映射、以及前几行样本写入诊断，方便前端/用户核对列名
+  // 把选中表的表头与映射、以及前几行样本写入诊断
   debug.push("chosenTableIdx=" + chosenTableIdx + " chosenHeaderIdx=" + chosenHeaderIdx);
   debug.push("chosenHeaders=" + JSON.stringify(chosen[chosenHeaderIdx]));
   debug.push("chosenMap=" + JSON.stringify(headerMap));
   for (let i = chosenHeaderIdx + 1; i < Math.min(chosenHeaderIdx + 4, chosen.length); i++) {
     debug.push("sampleRow[" + i + "]=" + JSON.stringify(chosen[i]));
   }
-  const rows: any[] = [];
+
+  // 4) 提取原始「科目」行
+  const rawRows: any[] = [];
+  const monthlyMode = headerMap.totalScheduled != null;
   for (let i = chosenHeaderIdx + 1; i < chosen.length; i++) {
     const row = chosen[i];
     if (!row.length || row.every((c) => c === "")) continue;
     const get = (k: string) => row[headerMap![k]];
     const subject = (get("subject") || "").trim();
-    if (!subject) { errors.push("第 " + (i + 1) + " 行缺少科组，已跳过"); continue; }
+    if (!subject || isTotalRow(subject)) continue;
+
+    let scheduled = 0;
+    if (monthlyMode) {
+      // 月度表：预排 = 总排 - 老师请假 - 学生请假
+      scheduled = toNum(get("totalScheduled")) - toNum(get("teacherAbsent")) - toNum(get("studentAbsent"));
+    } else if (headerMap.scheduled != null) {
+      scheduled = toNum(get("scheduled"));
+    }
+    const produced = toNum(get("produced"));
     const wkCell = headerMap.week != null ? Math.round(toNum(get("week"))) : 0;
-    rows.push({
+
+    rawRows.push({
       year, month: mon,
       week: wkCell || week,
       subject,
-      scheduled: toNum(get("scheduled")),
-      produced: toNum(get("produced")),
+      scheduled: Math.round(scheduled * 100) / 100,
+      produced: Math.round(produced * 100) / 100,
     });
   }
-  return json({ ok: true, rows, errors, debug: debug.join("\n"), source: url, fnVersion: FN_VERSION, chosenTableIdx }, 200, req);
+
+  // 5) 聚合成科组
+  const { rows, groupErrors } = groupToKeshi(rawRows);
+  errors.push(...groupErrors);
+
+  debug.push("rawRows=" + rawRows.length + " groupedRows=" + rows.length);
+  debug.push("grouped=" + JSON.stringify(rows));
+
+  return json({ ok: true, rows, rawRows, errors, debug: debug.join("\n"), source: url, fnVersion: FN_VERSION, chosenTableIdx }, 200, req);
 }
 
 function json(obj: any, status: number, req?: Request): Response {
