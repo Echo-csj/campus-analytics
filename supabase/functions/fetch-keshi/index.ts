@@ -327,9 +327,11 @@ async function handle(req: Request): Promise<Response> {
 }
 
 function json(obj: any, status: number, req?: Request): Response {
+  const headers = corsHeaders(req);
+  headers.set("Content-Type", "application/json; charset=utf-8");
   return new Response(JSON.stringify(obj), {
     status,
-    headers: corsHeaders(req),
+    headers,
   });
 }
 
