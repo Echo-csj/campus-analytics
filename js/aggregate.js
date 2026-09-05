@@ -74,12 +74,15 @@
   }
 
   // —— 人工月支持：把周报记录映射到「人工月」（周度=自然周 Mon–Sun，月度=人工月，最后一天为周日）——
-  // 人工月最后一天（自然周周日）：自然月最后一天若在当周周二及之前→该周归上月，周三及之后→归本月
+  // 【用户权威口径·对齐拉取页面(91paike)】人工月周次 = 页面周次。页面按「周日所属自然月」标注周次：
+  //   每月周次 = 该自然月内「周日」的个数；跨月溢出周（如 9/28–10/4，其周日为 10/4）归属下月第 1 周。
+  //   => 人工月最后一天 = 自然月内「最后一个周日」（即 ≤ 自然月最后一天 的最后一个周日）。
+  //   例：2026-09 最后一天为周三(9/30)，最后一个周日=9/27 → 9 月只有第 1–4 周；9/28–10/4 属 10 月第 1 周。
+  //   （早前曾按「周三及之后归本月」推算成 9 月第 5 周，与页面不一致——页面根本没有 9 月第 5 周选项，已废弃该口径。）
   function manualLastDay(Y, m) {
     const L = new Date(Y, m, 0); // 自然月最后一天（m 月：取 m 月第 0 天）
-    const dw = L.getDay() === 0 ? 7 : L.getDay(); // 周一=1..周日=7
-    if (dw <= 2) return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dw); // 上一周日
-    return new Date(L.getFullYear(), L.getMonth(), L.getDate() + (7 - dw)); // 本周日
+    const dow = L.getDay();      // 0=周日..6=周六
+    return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dow); // 回退到 ≤L 的最后一个周日
   }
   function manualMonthOf(date) {
     let Y = date.getFullYear(), m = date.getMonth() + 1;

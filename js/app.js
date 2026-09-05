@@ -1553,9 +1553,9 @@
   }
 
   // 核心看板子页：科组生产预测（用已完成月数据，预测下月指标）
-  // 根据当前日期，按"自然周(周一至周日)+人工月"规则推算 X月第X周
-  // 规则：自然月最后一天若在周一/周二 -> 该周归新月份(本月止于上一周日)；
-  //       若在周三及之后 -> 该周归本月(止于本周日)。周日即月度最后一天。
+  // 根据当前日期，按"自然周(周一至周日)+人工月"规则推算 X月第X周（人工月=拉取页面周次）。
+  // 人工月最后一天 = 自然月内最后一个周日（≤自然月最后一天）；页面按「周日所属自然月」标注周次，
+  //   跨月溢出周（如 9/28–10/4，其周日为 10/4）归下月第 1 周，故 9 月仅第 1–4 周，不存在第 5 周。
   // 人工月最后一天（自然周周日）：自然月最后一天若在当周周二及之前则归上月，周三及之后归本月
   function currentManualWeek(date) {
     const mm = AGG.manualMonthOf(date);
@@ -1666,28 +1666,14 @@
   }
 
   // 给定自然月，枚举其「人工月」下真正属于该月的每一周（Mon–Sun），并映射到 91paike 实际的
-  // 月份/周次（91paike 按自然月标注周次，跨月溢出周会被标到下月第 1 周）。
-  // 规则（用户权威口径）：周度=自然周(Mon–Sun)，周日为周/月最后一天；
-  //   自然月最后一天在当周周二及之前→该周归上月；周三及之后→该周归本月。
-  // 返回 [{src:{y,m,w}, attr:{y,mo,wk}}]：src=向云端请求的 91paike 月份/周次，attr=按规则重归并后的归属。
+  // 给定自然月 (Y,m)，枚举 91paike 实际提供的每一周（与人工月一一对应）。
+  // 规则（用户权威口径·对齐拉取页面）：周度=自然周(Mon–Sun)，页面按「周日所属自然月」标注周次；
+  //   每月周次 = 该自然月内「周日」的个数，跨月溢出周归属下月第 1 周
+  //   （例如 9/28–10/4 这一周在页面上属于「10 月第 1 周」，因此 9 月只有第 1–4 周，不存在第 5 周）。
   function attributedWeeksForMonth(Y, m) {
-    // 人工月首周一 = 上月人工月最后周日 + 1；人工月最后周日 = manualLastDay(本月)
-    let pY = Y, pm = m - 1; if (pm < 1) { pm = 12; pY--; }
-    const prevML = AGG.manualLastDay(pY, pm);
-    const MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
-    const ML = AGG.manualLastDay(Y, m);
+    const N = AGG.manualMonthWeekCount(Y, m); // 该月实际周数 = 自然月内周日个数（与页面选项一致）
     const list = [];
-    let wk = 0;
-    for (let d = new Date(MS); d <= ML; d.setDate(d.getDate() + 7)) {
-      wk++;
-      const sun = new Date(d); sun.setDate(sun.getDate() + 6); // 该周周日
-      const sy = sun.getFullYear(), sm = sun.getMonth() + 1;
-      const first = new Date(sy, sm - 1, 1);
-      let fd = new Date(first);
-      while (fd.getDay() !== 0) fd.setDate(fd.getDate() + 1); // 该自然月第一个周日
-      const srcW = Math.round((sun - fd) / 86400000) / 7 + 1;
-      list.push({ src: { y: sy, m: sm, w: srcW }, attr: { y: Y, mo: m, wk: wk } });
-    }
+    for (let k = 1; k <= N; k++) list.push({ src: { y: Y, m: m, w: k }, attr: { y: Y, mo: m, wk: k } });
     return list;
   }
 
@@ -3114,7 +3100,7 @@
           keshiBtn.disabled = false; if (keshiAllBtn) keshiAllBtn.disabled = false;
         }
       });
-      // 拉取全部周次：按人工月规则算出本月应含的各周（含跨月溢出周归并），逐周拉取后合并预览
+      // 拉取全部周次：按页面周次枚举本月实际提供的每一周（1..N），逐周拉取后合并预览
       if (keshiAllBtn) keshiAllBtn.addEventListener('click', async () => {
         const month = ($('#atKeshiMonth').value || '').trim();
         const note = $('#atKeshiNote');
@@ -3144,7 +3130,7 @@
             toast('暂无可拉取的周度数据');
           } else {
             renderActualPreview({ records: all, errors: errs, debug: dbg.join('\n\n') });
-            if (note) note.textContent = '已拉取 ' + all.length + ' 条（' + plan.length + ' 周，含跨月溢出周归并）';
+            if (note) note.textContent = '已拉取 ' + all.length + ' 条（' + plan.length + ' 周）';
           }
         } catch (e) {
           const msg = (e && e.message) || String(e);
