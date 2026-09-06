@@ -322,7 +322,9 @@ table tfoot td .muted { color: var(--text-3); }
 /* 仪表盘卡片 */
 .gauge-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 16px; }
 .gauges-4 { grid-template-columns: repeat(4, 1fr); }
-@media (max-width: 880px) { .gauge-grid { grid-template-columns: 1fr 1fr; } }
+.gauges-5 { grid-template-columns: repeat(5, 1fr); }
+@media (max-width: 1200px) { .gauges-5 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 880px) { .gauge-grid, .gauges-4, .gauges-5 { grid-template-columns: 1fr 1fr; } }
 
 .gauge-card {
   border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; background: var(--bg);

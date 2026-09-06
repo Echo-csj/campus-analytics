@@ -1883,12 +1883,19 @@
         gaugeCard('年度生产完成率', pct(v.v1MonthRate), '', v.v1MonthRate != null ? v.v1MonthRate * 100 : null, 'var(--indigo)'),
         gaugeCard('年度1V1生产课时', fmt(v.v1MonthProduced), '课时', null, null),
         gaugeCard('年度1V6生产课时', fmt(v.v6MonthProduced), '课时', null, null),
-        gaugeCard('年度人均效能值', fmt(v.monthEff, 0), '', null, null),
-        gaugeCard('年度饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--green)'),
+        gaugeCard('年度退费人数', fmt(v.tfMonthNum), '人', null, null),
+        gaugeCard('年度退费人数率', pct(v.tfMonthNumRate), '', v.tfMonthNumRate != null ? v.tfMonthNumRate * 100 : null, 'var(--red)'),
+        gaugeCard('年度结课人数', fmt(v.jkMonthNum), '人', null, null),
+        gaugeCard('年度结课人数率', pct(v.jkMonthNumRate), '', v.jkMonthNumRate != null ? v.jkMonthNumRate * 100 : null, 'var(--green)'),
+        gaugeCard('年度停课率', pct(v.tkNumRate), '', v.tkNumRate != null ? v.tkNumRate * 100 : null, 'var(--amber)'),
         gaugeCard('年度续费人数', fmt(v.xfMonthNum), '人', null, null),
-        gaugeCard('年度骨干教师占比', pct(v.coreTeacherRatio), '', v.coreTeacherRatio != null ? v.coreTeacherRatio * 100 : null, 'var(--amber)'),
+        gaugeCard('年度推荐人数', fmt(v.tjMonthNum), '人', null, null),
+        gaugeCard('年度饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--indigo)'),
+        gaugeCard('年度离职人数', fmt(v.quitMonth), '人', null, null),
+        gaugeCard('年度离职率', pct(v.quitMonthRate), '', v.quitMonthRate != null ? v.quitMonthRate * 100 : null, 'var(--red)'),
+        gaugeCard('当前教师人数', fmt(v.teacherCount), '人', null, null),
       ];
-      let h = '<div class="gauge-grid">' + gauges.join('') + '</div>';
+      let h = '<div class="gauge-grid gauges-5">' + gauges.join('') + '</div>';
       // 缺失月份提示
       let note = '数据来源：' + y + '年 ' + (yd.sourceMonths.length ? yd.sourceMonths.map(m => m + '月').join('、') : '无') + ' 月度周报。';
       if (yd.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + yd.missingMonths.map(m => m + '月').join('、') + '，结果可能不完整。</span>';
@@ -1903,7 +1910,7 @@
           '<td style="color:#71717a;font-size:12.5px">' + esc(r.ruleText) + '</td></tr>';
       });
       h += '</tbody></table></div>';
-      h += '<div class="preview-note">说明：率/均价/停课/骨干/双三/人均效能值等为<b>全年各月平均</b>；仅生产完成率、课时生产总现金、金额占比三项按原表公式计算；离职人数率为<b>全年各月「月离职人数率」之和</b>。</div>';
+      h += '<div class="preview-note">说明：率/均价/骨干/双三/人均效能值等为<b>全年各月平均</b>；仅生产完成率、课时生产总现金、金额占比三项按原表公式计算；离职人数率、停课率均为<b>全年各月「月离职人数率 / 月停课人数率」之和</b>。</div>';
       $('#ydashResult').innerHTML = h;
       // 月度趋势图
       destroyChart('yrTrendChart');
@@ -1962,10 +1969,21 @@
         const gauges = [
           gaugeCard('Q' + q.quarter + '课时生产总现金', fmt(v.monthCashTotal), '元', null, null),
           gaugeCard('Q' + q.quarter + '生产完成率', pct(v.v1MonthRate), '', v.v1MonthRate != null ? v.v1MonthRate * 100 : null, 'var(--indigo)'),
+          gaugeCard('Q' + q.quarter + '1V1生产课时', fmt(v.v1MonthProduced), '课时', null, null),
+          gaugeCard('Q' + q.quarter + '1V6生产课时', fmt(v.v6MonthProduced), '课时', null, null),
+          gaugeCard('Q' + q.quarter + '退费人数', fmt(v.tfMonthNum), '人', null, null),
+          gaugeCard('Q' + q.quarter + '退费人数率', pct(v.tfMonthNumRate), '', v.tfMonthNumRate != null ? v.tfMonthNumRate * 100 : null, 'var(--red)'),
+          gaugeCard('Q' + q.quarter + '结课人数', fmt(v.jkMonthNum), '人', null, null),
+          gaugeCard('Q' + q.quarter + '结课人数率', pct(v.jkMonthNumRate), '', v.jkMonthNumRate != null ? v.jkMonthNumRate * 100 : null, 'var(--green)'),
+          gaugeCard('Q' + q.quarter + '停课率', pct(v.tkNumRate), '', v.tkNumRate != null ? v.tkNumRate * 100 : null, 'var(--amber)'),
           gaugeCard('Q' + q.quarter + '续费人数', fmt(v.xfMonthNum), '人', null, null),
-          gaugeCard('Q' + q.quarter + '饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--green)'),
+          gaugeCard('Q' + q.quarter + '推荐人数', fmt(v.tjMonthNum), '人', null, null),
+          gaugeCard('Q' + q.quarter + '饱和度', pct(v.monthSaturation), '', v.monthSaturation != null ? v.monthSaturation * 100 : null, 'var(--indigo)'),
+          gaugeCard('Q' + q.quarter + '离职人数', fmt(v.quitMonth), '人', null, null),
+          gaugeCard('Q' + q.quarter + '离职率', pct(v.quitMonthRate), '', v.quitMonthRate != null ? v.quitMonthRate * 100 : null, 'var(--red)'),
+          gaugeCard('Q' + q.quarter + '当前教师人数', fmt(v.teacherCount), '人', null, null),
         ];
-        h += '<div class="qtr-block"><div class="qtr-head">Q' + q.quarter + (q.missingMonths.length ? ' <span class="tag warn">缺' + q.missingMonths.map(m => m + '月').join('') + '</span>' : '') + '</div><div class="gauge-grid gauges-4">' + gauges.join('') + '</div></div>';
+        h += '<div class="qtr-block"><div class="qtr-head">Q' + q.quarter + (q.missingMonths.length ? ' <span class="tag warn">缺' + q.missingMonths.map(m => m + '月').join('') + '</span>' : '') + '</div><div class="gauge-grid gauges-5">' + gauges.join('') + '</div></div>';
       });
       // 对比图表
       h += '<div class="section-h">各季度指标对比</div>';
@@ -1985,7 +2003,7 @@
         h += '</tr>';
       });
       h += '</tbody></table></div>';
-      h += '<div class="preview-note">说明：各季度汇总口径完全一致（率/均价取三月平均，生产完成率/总现金/金额占比/离职率按公式），便于横向比较。</div>';
+      h += '<div class="preview-note">说明：各季度汇总口径完全一致（率/均价取三月平均，生产完成率/总现金/金额占比按公式，离职率、停课率均为各月「月离职人数率 / 月停课人数率」之和），便于横向比较。</div>';
       $('#qdashResult').innerHTML = h;
       // 对比柱状图
       const sel = $('#qCmpMetric');
