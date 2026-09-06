@@ -3480,6 +3480,130 @@
     }));
   }
 
+  // —— AI 数据分析 ——
+  function renderAi() {
+    const datasets = (CA.ai && CA.ai.listDatasets) ? CA.ai.listDatasets() : [{ id: 'monthly', label: '月度汇总数据', stream: 'monthly', note: '' }];
+    const chips = [
+      { q: '整体概况摘要', t: '生成整体概况摘要' },
+      { q: '1V1月生产完成率趋势', t: '生产完成率趋势' },
+      { q: '离职率与停课率异常检测', t: '离职/停课异常检测' },
+      { q: '续费、退费、推荐对比', t: '续费/退费/推荐对比' },
+      { q: '各核心指标月度走势', t: '核心指标走势' },
+      { q: '最新一期率类指标构成', t: '率类指标构成' },
+    ];
+    const html =
+      '<div class="ai-wrap">' +
+        '<div class="ai-head">' +
+          '<div class="ai-title">AI 数据分析</div>' +
+          '<div class="preview-note">用自然语言提问，自动识别数据特征并生成可视化图表与智能洞察（趋势预测 / 异常检测 / 关键指标摘要）。当前默认本地引擎，无需联网即可使用；配置云端 LLM 后能力更强。</div>' +
+        '</div>' +
+        '<div class="ai-controls">' +
+          '<div class="field"><label>选择数据集</label><select id="aiDataset">' +
+            datasets.map(d => '<option value="' + d.stream + '">' + esc(d.label) + (d.note ? '（' + esc(d.note) + '）' : '') + '</option>').join('') +
+          '</select></div>' +
+          '<div class="field grow"><label>自然语言问题</label>' +
+            '<textarea id="aiQuery" rows="2" placeholder="例如：近半年 1V1 月生产完成率趋势如何？有没有异常波动？离职率与停课率是否偏高？"></textarea></div>' +
+          '<button class="btn primary" id="aiRun">分析</button>' +
+        '</div>' +
+        '<div class="ai-chips">' +
+          chips.map(c => '<button class="chip" data-q="' + esc(c.q) + '">' + esc(c.t) + '</button>').join('') +
+        '</div>' +
+        '<div id="aiResult"></div>' +
+      '</div>';
+    $('#content').innerHTML = html;
+
+    const qEl = $('#aiQuery'), dsEl = $('#aiDataset'), btn = $('#aiRun'), resEl = $('#aiResult');
+    $('.ai-chips').querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => {
+      qEl.value = c.getAttribute('data-q');
+      run();
+    }));
+    btn.addEventListener('click', run);
+    qEl.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run(); });
+
+    function run() {
+      const query = qEl.value.trim();
+      const stream = dsEl.value;
+      btn.disabled = true; btn.textContent = '分析中…';
+      resEl.innerHTML = '<div class="ai-loading"><span class="spinner"></span> 正在分析数据并生成图表…</div>';
+      Promise.resolve(CA.ai.analyze({ query, stream }))
+        .then(r => renderResult(r))
+        .catch(err => { resEl.innerHTML = '<div class="warn">分析失败：' + esc(err && err.message || String(err)) + '</div>'; })
+        .then(() => { btn.disabled = false; btn.textContent = '分析'; });
+    }
+
+    function renderResult(r) {
+      // 清理旧图表
+      if (CA._aiCharts) Object.values(CA._aiCharts).forEach(c => { try { c.destroy(); } catch (_) {} });
+      CA._aiCharts = {};
+      if (!r || r.ok === false) {
+        resEl.innerHTML = '<div class="ai-empty"><div class="ai-empty-icon">📊</div>' +
+          '<div>' + esc((r && r.error) || '暂无分析结果') + '</div>' +
+          '<div class="preview-note" style="margin-top:8px">提示：先到「数据源」上传 DOS 周报并生成月度数据，或到「科组生产指标」拉取实际数据，再来此分析。</div></div>';
+        return;
+      }
+      const srcBadge = r.meta && r.meta.degradedFromEdge
+        ? '<span class="tag warn">云端不可用·已降级本地</span>'
+        : (r.source === 'edge' ? '<span class="tag good">云端 LLM</span>' : '<span class="tag">本地引擎</span>');
+      let h = '<div class="ai-summary-card"><div class="ai-summary-head">分析摘要 ' + srcBadge + '</div><div class="ai-summary-body">' + esc(r.summary || '（无摘要）') + '</div></div>';
+      // 洞察
+      if (r.insights && r.insights.length) {
+        h += '<div class="section-h">智能洞察</div><div class="insight-list">';
+        r.insights.forEach(i => {
+          const sev = (i.severity === 'good') ? 'good' : (i.severity === 'warn') ? 'warn' : 'info';
+          h += '<div class="insight ' + sev + '"><div class="insight-title">' + esc(i.title || '') + '</div><div class="insight-text">' + esc(i.text || '') + '</div></div>';
+        });
+        h += '</div>';
+      }
+      // 图表
+      if (r.charts && r.charts.length) {
+        h += '<div class="section-h">可视化图表</div><div class="ai-charts">';
+        r.charts.forEach(s => {
+          h += '<div class="ai-chart-card"><div class="ai-chart-title">' + esc(s.title || '') + '</div><div class="chart-box"><canvas id="ai_' + esc(s.id) + '"></canvas></div></div>';
+        });
+        h += '</div>';
+      } else {
+        h += '<div class="preview-note">该问题未生成图表（可能数据不足或口径不匹配）。</div>';
+      }
+      resEl.innerHTML = h;
+      renderAiCharts(r);
+    }
+  }
+
+  // 把 ChartSpec 渲染为 Chart.js 实例（ChartSpec 契约见 js/ai-client.js）
+  function renderAiCharts(result) {
+    if (typeof Chart === 'undefined') return;
+    const palette = ['#4F46E5', '#0EA5E9', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6'];
+    (result.charts || []).forEach(spec => {
+      const cv = document.getElementById('ai_' + spec.id);
+      if (!cv) return;
+      const isPct = spec.format === 'pct';
+      const pieLike = spec.type === 'pie' || spec.type === 'doughnut';
+      const datasets = (spec.datasets || []).map((d, i) => ({
+        label: d.label, data: d.data,
+        backgroundColor: d.color || (pieLike ? palette : 'rgba(79,70,229,.75)'),
+        borderColor: d.color || (pieLike ? '#fff' : '#4F46E5'),
+        borderWidth: pieLike ? 2 : (spec.type === 'line' ? 2 : 0),
+        fill: spec.type === 'area', tension: 0.3, borderRadius: 5, pointRadius: 3,
+      }));
+      const cfg = {
+        type: (spec.type === 'area') ? 'line' : (spec.type || 'line'),
+        data: { labels: spec.labels || [], datasets },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: {
+            legend: { display: (spec.datasets || []).length > 1 || pieLike },
+            tooltip: { callbacks: { label: c => { const v = c.parsed.y != null ? c.parsed.y : c.parsed; return (c.dataset.label ? c.dataset.label + '：' : '') + (isPct ? (v * 100).toFixed(1) + '%' : fmt(v)); } } },
+          },
+          scales: pieLike ? {} : {
+            y: { beginAtZero: true, ticks: { callback: v => isPct ? (v * 100).toFixed(0) + '%' : fmt(v) } },
+            x: { ticks: { maxRotation: 45, minRotation: 0, autoSkip: true, maxTicksLimit: 12 } },
+          },
+        },
+      };
+      try { CA._aiCharts[spec.id] = new Chart(cv.getContext('2d'), cfg); } catch (_) {}
+    });
+  }
+
   // —— 路由 ——
   const tabs = {
     kezu: { title: '最佳科组', render: renderKezu },
@@ -3495,6 +3619,7 @@
     $all('.nav-item').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
     $('#tabTitle').textContent = tabs[tab].title;
     Object.values(charts).forEach(c => c.destroy()); for (const k in charts) delete charts[k];
+    if (CA._aiCharts) { Object.values(CA._aiCharts).forEach(c => { try { c.destroy(); } catch (_) {} }); CA._aiCharts = {}; }
     tabs[tab].render();
   }
 
