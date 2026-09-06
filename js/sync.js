@@ -3,19 +3,6 @@
  *       订阅 Realtime 实现跨设备近实时；shared_link 用于向个人台推送分析快照。
  * 关键：未配置 APP_CONFIG（仍是 YOUR_ 占位符）时自动禁用 —— 站点行为与之前完全一致（纯本地）。
  */
-/* 自举：确保唯一计算源 kezu-compute.js 在 sync.js 之前加载。
- * 部署时若 index.html 未含此引用（如并行会话改动未上线），在此同步注入，
- * 保证「推送分析到个人台」时 window.App.kezuCompute 已就绪。幂等：已加载则跳过。 */
-(function () {
-  if (typeof window !== 'undefined' && window.document && window.document.write) {
-    try {
-      if (!(window.App && window.App.kezuCompute)) {
-        document.write('<script src="js/kezu-compute.js?v=20260906a"><\/script>');
-      }
-    } catch (e) {}
-  }
-})();
-
 (function (global) {
   'use strict';
   var CA = global.CA || (global.CA = {});
@@ -223,22 +210,12 @@
     var kezuC = kezuCRec && kezuCRec.values ? kezuCRec.values.C : null;
     if (kezuC != null && typeof kezuC === 'string') kezuC = parseFloat(kezuC);
     if (kezuC != null && !isFinite(kezuC)) kezuC = null;
-    // 联动科组「完整计算模型」：由唯一计算源(kezu-compute.js)一次性算好随快照下发，个人台只渲染（杜绝二次推导分叉）
-    var kezuLinked = null;
-    try {
-      if (window.App && window.App.kezuCompute && window.App.kezuCompute.buildLinkedKezu) {
-        kezuLinked = App.kezuCompute.buildLinkedKezu({
-          detail: kezuDetail, score: kezuScore, actual: kezuActual, C: kezuC,
-          monthlyHistory: monthlyHistory, latestByStream: byStream
-        });
-      }
-    } catch (e) { console.warn('[sync] buildLinkedKezu failed', e); kezuLinked = null; }
     return {
       generatedAt: new Date().toISOString(),
       totalRecords: all.length,
       latestByStream: byStream,
       monthlyHistory: monthlyHistory,
-      kezu: { detail: kezuDetail, score: kezuScore, actual: kezuActual, C: kezuC, linked: kezuLinked }
+      kezu: { detail: kezuDetail, score: kezuScore, actual: kezuActual, C: kezuC }
     };
   }
   async function pushSharedSnapshot() {

@@ -1775,26 +1775,29 @@
         const pmEnd = AGG.manualLastDay(pm.year, pm.month);
         if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week; // 预测月已结束→全部周完成
       }
-      // 完成率：按已完成周实产；差距课时：固定减去「整月已预排」（不再随日期按已完成周漂移）
-      const done = actualSummary(pm.year, pm.month, reportWeek);
+      // 校区实时完成率：分子=已拉取(kezuActual)的实产合计，分母=月度生产目标(sumFinal)；
+      // 直接以「已拉取数据」为准（不再按日历周次推算 reportWeek），未拉取的周不计入，
+      // 避免误显示未来周（如「9月第2周」实际尚未拉取第2周数据）的完成率。
       const whole = actualSummary(pm.year, pm.month, null);
-      const campusActual = done.campusActual;
+      const campusActual = whole.campusActual;
       const campusSched = whole.campusSched;
       const hasData = whole.hasData;
       const actRate = sumFinal > 0 ? campusActual / sumFinal : 0;
+      const actualRecs = STORE.list('kezuActual').filter(r => r.year === pm.year && r.month === pm.month);
+      const latestPulledWeek = actualRecs.reduce((mx, r) => Math.max(mx, +r.week || 0), 0);
       // 校区生产差距课时 = 生产指标（对应 G 档）− 整月已预排总数据
       const gapG1 = state.C - campusSched;
       const gapG2 = state.C * 1.10 - campusSched;
       const gapG3 = state.C * 1.25 - campusSched;
       const gapText = v => v <= 0 ? '<span class="tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>';
 
-      const weekLabel = reportWeek > 0 ? (pm.month + '月第' + reportWeek + '周完成率') : '本周完成率';
+      const rtLabel = '校区实时完成率' + (hasData ? '（截至第' + latestPulledWeek + '周）' : '');
       let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 指标</div><div class="v" style="color:#4F46E5">' + fmt(state.C * 1.25) + '</div></div>' +
-        '<div class="stat-card"><div class="k">' + weekLabel + '</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
+        '<div class="stat-card"><div class="k">' + rtLabel + '</div><div class="v" style="color:var(--indigo)">' + (hasData ? pct(actRate) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
@@ -2944,9 +2947,11 @@
 
       const campusCum = campusFinal > 0 ? campusActual / campusFinal : 0;
       const campusME = campusFinal > 0 ? campusMonthEnd / campusFinal : 0;
+      const latestPulledWeek = actuals.reduce((mx, r) => Math.max(mx, +r.week || 0), 0);
+      const cumLabel = '校区实时完成率' + (actuals.length ? '（截至第' + latestPulledWeek + '周）' : '');
       let top = '<div class="stat-grid" style="margin:6px 0 14px">';
       top += '<div class="stat-card"><div class="k">跟踪月份</div><div class="v">' + py + '/' + pm + '</div></div>';
-      top += '<div class="stat-card"><div class="k">校区累计完成率</div><div class="v" style="color:var(--indigo)">' + pct(campusCum) + '</div></div>';
+      top += '<div class="stat-card"><div class="k">' + cumLabel + '</div><div class="v" style="color:var(--indigo)">' + pct(campusCum) + '</div></div>';
       top += '<div class="stat-card"><div class="k">校区月末预测完成率</div><div class="v" style="color:var(--indigo)">' + pct(campusME) + '</div></div>';
       top += '<div class="stat-card"><div class="k">月末预测达到级别</div><div class="v">' + levelBadgeOf(campusME) + '</div></div>';
       top += '</div>';
