@@ -5,3 +5,7 @@ project_id = "zxemcyngesgxpbevdxsu"
 [functions.fetch-keshi]
 # 用我们自己的共享密钥(x-keshi-secret)鉴权，不依赖 Supabase JWT
 verify_jwt = false
+
+[functions.ai-analyze]
+# AI 数据分析云端 LLM 代理：前端用共享密钥(x-ai-secret)鉴权，不依赖 Supabase JWT
+verify_jwt = false
