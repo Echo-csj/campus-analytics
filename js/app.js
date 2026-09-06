@@ -2030,35 +2030,75 @@
     }
   }
 
-  // —— 核心看板 · 周报对比（某月各周横向对比，数据源于数据源 DOS 周报）——
+  // —— 核心看板 · 周报对比（两种对比：① 月度的周数据对比；② 月度数据对比）——
   function renderWeeklyCompareDashboard() {
     const recs = STORE.list('weekly');
     if (!recs.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」入库 DOS 周报（各周）。</div>'; return; }
+
+    // 月度数据：优先 monthly 流，未入库则按月末周自动派生，保证「月度数据对比」可立即查看
+    const monthlyStored = getMonthlyRecords();
+    const monthlyDerived = monthlyStored.length ? null : AGG.materializeMonthlyFromWeekly(recs);
+    const monthlyRecs = monthlyStored.length ? monthlyStored : (monthlyDerived || []);
+    const derivedNote = monthlyStored.length ? '' : '<span class="tag warn">提示</span> 未检测到月度数据流，当前「月度数据对比」按月末周自动派生显示；如需权威月度口径，请在「数据源」生成月度数据。';
+
     // 可用月份（周报按自然月存储，故以自然月为选择维度）
-    const set = {}, months = [];
-    recs.forEach(r => { const k = r.year + '-' + r.month; if (!set[k]) { set[k] = true; months.push({ year: r.year, month: r.month }); } });
+    const mSet = {}, months = [];
+    recs.forEach(r => { const k = r.year + '-' + r.month; if (!mSet[k]) { mSet[k] = true; months.push({ year: r.year, month: r.month }); } });
     months.sort((a, b) => (a.year - b.year) || (a.month - b.month));
+
+    const ySet = {};
+    monthlyRecs.forEach(r => { ySet[r.year] = true; });
+    const years = Object.keys(ySet).map(Number).sort((a, b) => a - b);
+
     const now = new Date();
     const cur = { year: now.getFullYear(), month: now.getMonth() + 1 };
-    const hasCur = months.some(m => m.year === cur.year && m.month === cur.month);
-    // 默认：优先当前月份（若有数据），否则取最新有数据的月份，避免停留在过期月份
-    const def = hasCur ? cur : months[months.length - 1];
+    const hasCurMonth = months.some(m => m.year === cur.year && m.month === cur.month);
+    const defMonth = hasCurMonth ? cur : months[months.length - 1];
     const curLabel = cur.year + '年' + cur.month + '月';
     const latestLabel = months.length ? (months[months.length - 1].year + '年' + months[months.length - 1].month + '月') : '—';
-    const monthNote = hasCur
+    const monthNote = hasCurMonth
       ? '当前月份：<b>' + curLabel + '</b>（已显示）'
       : '当前月份：<b>' + curLabel + '</b>；最新数据：<b>' + latestLabel + '</b>（已显示，可在上方切换）';
-    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>月份（当前 ' + curLabel + '）</label><select id="wcMonth">' +
-      months.map(m => '<option value="' + m.year + '-' + m.month + '"' + (m.year === def.year && m.month === def.month ? ' selected' : '') + '>' + m.year + '年' + m.month + '月</option>').join('') + '</select></div>' +
-      '<div class="preview-note" style="margin-left:8px">数据来源：周度数据（DOS 周报）。' + monthNote + '。仅做该月各周度数据横向对比——周度数据只关联本页，不进入月度 / 季度 / 年度 / 满意度计算。</div></div>';
-    html += '<div id="wcResult"></div>';
-    $('#dashBody').innerHTML = html;
-    $('#wcMonth').addEventListener('change', draw);
 
-    function draw() {
+    const hasCurYear = years.includes(cur.year);
+    const defYear = hasCurYear ? cur.year : (years.length ? years[years.length - 1] : cur.year);
+
+    let mode = 'weekly';
+    const html = '<div class="dash-tabs" id="wcModeTabs" style="margin-bottom:12px">' +
+      '<button class="dash-tab active" data-mode="weekly">月度的周数据对比</button>' +
+      '<button class="dash-tab" data-mode="monthly">月度数据对比</button>' +
+      '</div>' +
+      '<div id="wcResult"></div>';
+    $('#dashBody').innerHTML = html;
+
+    const tabs = $('#wcModeTabs');
+    tabs.addEventListener('click', e => {
+      if (!e.target.matches('.dash-tab')) return;
+      tabs.querySelectorAll('.dash-tab').forEach(b => b.classList.remove('active'));
+      e.target.classList.add('active');
+      mode = e.target.dataset.mode;
+      render();
+    });
+
+    function render() {
+      if (mode === 'weekly') renderWeekly();
+      else renderMonthly();
+    }
+
+    function renderWeekly() {
+      let h = '<div class="row" style="margin-bottom:16px;align-items:flex-end" id="wcHeader"><div class="field"><label>月份（当前 ' + curLabel + '）</label><select id="wcMonth">' +
+        months.map(m => '<option value="' + m.year + '-' + m.month + '"' + (m.year === defMonth.year && m.month === defMonth.month ? ' selected' : '') + '>' + m.year + '年' + m.month + '月</option>').join('') + '</select></div>' +
+        '<div class="preview-note" style="margin-left:8px">数据来源：周度数据（DOS 周报）。' + monthNote + '。仅做该月各周度数据横向对比——周度数据只关联本页，不进入月度 / 季度 / 年度 / 满意度计算。</div></div>' +
+        '<div id="wcBody"></div>';
+      $('#wcResult').innerHTML = h;
+      $('#wcMonth').addEventListener('change', drawWeekly);
+      drawWeekly();
+    }
+
+    function drawWeekly() {
       const [yy, mm] = $('#wcMonth').value.split('-').map(Number);
       let wkRecs = recs.filter(r => r.year === yy && r.month === mm).sort((a, b) => (a.week || 0) - (b.week || 0));
-      if (!wkRecs.length) { $('#wcResult').innerHTML = '<div class="empty">该月暂无周报数据。</div>'; return; }
+      if (!wkRecs.length) { $('#wcBody').innerHTML = '<div class="empty">该月暂无周报数据。</div>'; return; }
       // 过滤异常周次（周序号超出当月合理最大周数，如月末周被误标为第5/6周），避免幻影周次干扰对比；
       // 若全部为异常周次则退化为展示全部，保证不空白。
       const legitMax = legitMaxWeek(wkRecs);
@@ -2091,7 +2131,7 @@
       h += '<div class="section-h">指标周度趋势</div><div class="field" style="margin-bottom:10px"><label>选择对比指标</label><select id="wcMetric">' +
         keys.map(k => { const f = SCHEMA.weeklyFields.find(x => x.key === k); return '<option value="' + k + '">' + (f ? f.label : k) + '</option>'; }).join('') + '</select></div>';
       h += '<div class="chart-box"><canvas id="wcChart"></canvas></div>';
-      $('#wcResult').innerHTML = h;
+      $('#wcBody').innerHTML = h;
       const sel = $('#wcMetric');
       function drawChart() {
         destroyChart('wcChart');
@@ -2110,7 +2150,73 @@
       sel.addEventListener('change', drawChart);
       drawChart();
     }
-    draw();
+
+    function renderMonthly() {
+      if (!monthlyRecs.length) {
+        $('#wcResult').innerHTML = '<div class="empty">暂无月度数据。请先在「数据源」生成月度数据（或至少入库 DOS 周报以便派生）。</div>';
+        return;
+      }
+      let h = '<div class="row" style="margin-bottom:16px;align-items:flex-end" id="wcHeader"><div class="field"><label>年份</label><select id="wcYear">' +
+        years.map(y => '<option value="' + y + '"' + (y === defYear ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
+        '<div class="preview-note" style="margin-left:8px">数据来源：月度数据流（monthly）。对比全年各月月度数据横向差异——月度数据进入季度 / 年度 / 满意度计算。' + derivedNote + '</div></div>' +
+        '<div id="wcBody"></div>';
+      $('#wcResult').innerHTML = h;
+      $('#wcYear').addEventListener('change', drawMonthly);
+      drawMonthly();
+    }
+
+    function drawMonthly() {
+      const yy = +$('#wcYear').value;
+      const me = monthlyRecs.filter(r => r.year === yy).sort((a, b) => (a.month || 0) - (b.month || 0));
+      if (!me.length) { $('#wcBody').innerHTML = '<div class="empty">' + yy + '年暂无月度数据。</div>'; return; }
+      const labels = me.map(r => (r.month || '?') + '月');
+      const keys = ['teacherCount', 'campusTotal', 'coreTeacherCount', 'doubleThreeCount', 'v1Students', 'v1Subjects', 'v6Students', 'v6Subjects',
+        'v1MonthTarget', 'v1MonthProduced', 'v1MonthRate', 'v6MonthProduced',
+        'monthCashTotal', 'v1MonthCash', 'v6MonthCash',
+        'monthEff', 'monthSaturation',
+        'xfMonthNum', 'tjMonthNum', 'jkMonthNum', 'tfMonthNum', 'tkNum',
+        'entryMonth', 'quitMonth', 'quitMonthRate', 'tkNumRate'];
+      const getv = (r, k) => (r.values && r.values[k] != null) ? r.values[k] : null;
+      let h = '<div class="preview-note">共 ' + me.length + ' 个月数据。</div>';
+      h += '<div class="section-h">月度数据横向对比</div><div class="table-wrap"><table><thead><tr><th>指标</th>';
+      labels.forEach(l => h += '<th class="num">' + l + '</th>');
+      h += '</tr></thead><tbody>';
+      keys.forEach(k => {
+        const f = SCHEMA.weeklyFields.find(x => x.key === k);
+        const isRatio = f && f.type === 'ratio' && f.unit !== '比';
+        h += '<tr><td>' + (f ? esc(f.label) : k) + '</td>';
+        me.forEach(r => {
+          const v = getv(r, k);
+          h += '<td class="num">' + (v == null ? '<span class="muted">—</span>' : (isRatio ? pct(v) : fmt(v))) + '</td>';
+        });
+        h += '</tr>';
+      });
+      h += '</tbody></table></div>';
+      // 选指标月度趋势图
+      h += '<div class="section-h">指标月度趋势</div><div class="field" style="margin-bottom:10px"><label>选择对比指标</label><select id="wcMonthMetric">' +
+        keys.map(k => { const f = SCHEMA.weeklyFields.find(x => x.key === k); return '<option value="' + k + '">' + (f ? f.label : k) + '</option>'; }).join('') + '</select></div>';
+      h += '<div class="chart-box"><canvas id="wcMonthChart"></canvas></div>';
+      $('#wcBody').innerHTML = h;
+      const sel = $('#wcMonthMetric');
+      function drawChart() {
+        destroyChart('wcMonthChart');
+        const ctx = $('#wcMonthChart'); if (!ctx) return;
+        const k = sel.value;
+        const f = SCHEMA.weeklyFields.find(x => x.key === k);
+        const isRatio = f && f.type === 'ratio' && f.unit !== '比';
+        const data = me.map(r => { const v = getv(r, k); return (v != null && isFinite(v)) ? (isRatio ? v * 100 : v) : null; });
+        charts['wcMonthChart'] = new Chart(ctx, {
+          type: 'bar',
+          data: { labels, datasets: [{ label: f ? f.label : k, data, backgroundColor: 'rgba(79,70,229,.75)', borderRadius: 5 }] },
+          options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, ticks: { callback: v => isRatio ? v + '%' : fmt(v) } } } },
+        });
+      }
+      sel.addEventListener('change', drawChart);
+      drawChart();
+    }
+
+    render();
   }
 
   // —— 核心看板 · 最佳科组排名（基于季度评比数据）——
