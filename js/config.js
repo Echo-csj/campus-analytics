@@ -13,7 +13,7 @@ window.APP_CONFIG = {
   // AI 数据分析：云端 LLM 代理（可选）。默认关闭，使用本地启发式引擎（完全离线、无需 Key）。
   // 已部署 Supabase Edge Function「ai-analyze」；在 Supabase Secrets 设置 AI_API_KEY 后，
   // 将下方 AI_USE_EDGE 改为 true 即可启用云端模式（无需改代码，函数会自动用 LLM 输出替换本地结果）。
-  AI_USE_EDGE: false,
+  AI_USE_EDGE: true,
   AI_FUNCTION: 'ai-analyze',
   // 与 Supabase Secret AI_FETCH_SECRET 统一（仅作防滥用闸门，非敏感密码，可公开）
   AI_FETCH_SECRET: 'ai-gate-f31c3e3b5bd865d0d1'
