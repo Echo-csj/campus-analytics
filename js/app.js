@@ -3612,6 +3612,7 @@
     compare: { title: '数据源', render: renderCompare },
     fix: { title: '数据修正', render: renderFixCenter },
     dashboard: { title: '核心看板', render: renderDashboard },
+    ai: { title: 'AI 分析', render: renderAi },
     data: { title: '数据备份', render: renderData },
   };
   function go(tab) {
