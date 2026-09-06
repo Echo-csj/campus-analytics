@@ -1903,7 +1903,7 @@
           '<td style="color:#71717a;font-size:12.5px">' + esc(r.ruleText) + '</td></tr>';
       });
       h += '</tbody></table></div>';
-      h += '<div class="preview-note">说明：率/均价/停课/骨干/双三/人均效能值等为<b>全年各月平均</b>；仅生产完成率、课时生产总现金、金额占比、离职人数率四项按原表公式计算。</div>';
+      h += '<div class="preview-note">说明：率/均价/停课/骨干/双三/人均效能值等为<b>全年各月平均</b>；仅生产完成率、课时生产总现金、金额占比三项按原表公式计算；离职人数率为<b>全年各月「月离职人数率」之和</b>。</div>';
       $('#ydashResult').innerHTML = h;
       // 月度趋势图
       destroyChart('yrTrendChart');
