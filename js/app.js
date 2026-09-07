@@ -1108,7 +1108,7 @@
   function renderSatDashboard() {
     const monthly = getMonthlyRecords();
     const data = AGG.satisfactionFromMonthEnd(monthly);
-    let html = '<div id="satExportWrap"><div class="row" style="margin-bottom:12px;justify-content:space-between"><div><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div><div><button class="btn sm" id="satImgBtn">⬇ 导出图片</button></div></div>';
+    let html = '<div id="satExportWrap"><div class="row" style="margin-bottom:12px;justify-content:space-between"><div><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div><div style="display:flex;gap:8px"><button class="btn sm" id="satImgBtn">⬇ 整体图片</button><button class="btn sm" id="satModBtn">⬇ 分模块</button></div></div>';
     html += '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」（月度数据体系）的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
     if (!data.length) html += '<div class="empty">尚无月度周报数据。请先在「数据源」页从周报生成各月月度数据。</div>';
@@ -1128,6 +1128,7 @@
     $('#dashBody').innerHTML = html;
     $('#satExportBtn').addEventListener('click', () => exportSatDashboard(monthly));
     $('#satImgBtn').addEventListener('click', () => exportElementImage('#satExportWrap', '五项满意度看板.png'));
+    $('#satModBtn').addEventListener('click', () => exportDashboardModules('#satExportWrap', '五项满意度看板'));
     if (data.length) {
       const labels = data.map(r => r.year + '/' + r.month);
       const ds = SCHEMA.satisfactionItems.map((it, idx) => ({
@@ -1811,7 +1812,7 @@
         '</div>' +
         '<div class="section-h-flex">' +
           '<div class="section-h">科组月度汇总（按周展开）</div>' +
-          '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' +
+          '<div style="display:flex;gap:8px"><button class="btn sm" id="dtExportImg">⬇ 整体图片</button><button class="btn sm" id="dtModBtn">⬇ 分模块</button></div>' +
         '</div>' +
         '<div id="dtTrackPanel">' + trackTable + '</div>' +
       '</div>';
@@ -1820,6 +1821,11 @@
       if (dtImgBtn) dtImgBtn.addEventListener('click', () => {
         dtImgBtn.style.visibility = 'hidden';
         exportElementImage('#dtExportWrap', '科组生产预测_' + pm.year + '_' + pm.month + '.png').then(() => { dtImgBtn.style.visibility = ''; });
+      });
+      const dtModBtn = $('#dtModBtn');
+      if (dtModBtn) dtModBtn.addEventListener('click', () => {
+        dtModBtn.style.visibility = 'hidden';
+        exportDashboardModules('#dtExportWrap', '科组生产预测_' + pm.year + '_' + pm.month).then(() => { dtModBtn.style.visibility = ''; });
       });
     }
 
@@ -1866,12 +1872,13 @@
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="yrImgBtn">⬇ 导出图片</button></div></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="yrImgBtn">⬇ 整体图片</button><button class="btn sm" id="yrModBtn">⬇ 分模块</button></div></div>';
     html += '<div id="ydashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashYr').addEventListener('change', () => drawYearDash());
     $('#yrExportBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportYearDashboard(recs, y); });
     $('#yrImgBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportElementImage('#ydashResult', '年度汇总看板_' + y + '.png'); });
+    $('#yrModBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportDashboardModules('#ydashResult', '年度汇总看板_' + y); });
     drawYearDash();
 
     function drawYearDash() {
@@ -1953,12 +1960,13 @@
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashQYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="qImgBtn">⬇ 导出图片</button></div></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="qImgBtn">⬇ 整体图片</button><button class="btn sm" id="qModBtn">⬇ 分模块</button></div></div>';
     html += '<div id="qdashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashQYr').addEventListener('change', () => drawQuarterDash());
     $('#qExportBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportQuarterDashboard(recs, y); });
     $('#qImgBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportElementImage('#qdashResult', '季度对比看板_' + y + '.png'); });
+    $('#qModBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportDashboardModules('#qdashResult', '季度对比看板_' + y); });
     drawQuarterDash();
 
     function drawQuarterDash() {
@@ -2067,7 +2075,7 @@
     const defYear = hasCurYear ? cur.year : (years.length ? years[years.length - 1] : cur.year);
 
     let mode = 'weekly';
-    const html = '<div class="row" style="margin-bottom:12px;justify-content:flex-end"><button class="btn sm" id="wcImgBtn">⬇ 导出图片</button></div>' +
+    const html = '<div class="row" style="margin-bottom:12px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="wcImgBtn">⬇ 整体图片</button><button class="btn sm" id="wcModBtn">⬇ 分模块</button></div></div>' +
       '<div class="dash-tabs" id="wcModeTabs" style="margin-bottom:12px">' +
       '<button class="dash-tab active" data-mode="weekly">月度的周数据对比</button>' +
       '<button class="dash-tab" data-mode="monthly">月度数据对比</button>' +
@@ -2076,6 +2084,7 @@
     $('#dashBody').innerHTML = html;
 
     $('#wcImgBtn').addEventListener('click', () => exportElementImage('#wcResult', '周报对比看板.png'));
+    $('#wcModBtn').addEventListener('click', () => exportDashboardModules('#wcResult', '周报对比看板'));
     const tabs = $('#wcModeTabs');
     tabs.addEventListener('click', e => {
       if (!e.target.matches('.dash-tab')) return;
@@ -2255,11 +2264,11 @@
       html += '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap"><div class="field"><label>年份</label><select id="kezuRankYr">' +
         years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
         '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>' +
-        '<div><button class="btn sm" id="kezuImgBtn">⬇ 导出图片</button></div></div>';
+        '<div style="display:flex;gap:8px"><button class="btn sm" id="kezuImgBtn">⬇ 整体图片</button><button class="btn sm" id="kezuModBtn">⬇ 分模块</button></div></div>';
       html += '<div id="kezuRankResult"></div>';
     } else {
       html += '<div class="preview-note" style="margin-bottom:12px">⚠ 当前仅有科组月度明细，缺少「最佳科组评比汇总」(Sheet5)，暂无法呈现季度/全年排名；下方为可用的横向对比数据。</div>';
-      html += '<div class="row" style="margin-bottom:16px;justify-content:flex-end"><button class="btn sm" id="kezuImgBtn">⬇ 导出图片</button></div>';
+      html += '<div class="row" style="margin-bottom:16px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="kezuImgBtn">⬇ 整体图片</button><button class="btn sm" id="kezuModBtn">⬇ 分模块</button></div></div>';
     }
     // 横向对比部分：依赖科组月度明细（bestkezu），与排名互不耦合
     if (monthly.length) {
@@ -2268,6 +2277,7 @@
     html += '</div>';
     $('#dashBody').innerHTML = html;
     $('#kezuImgBtn').addEventListener('click', () => exportElementImage('#kezuExportWrap', '最佳科组排名看板_' + (yr || '') + '.png'));
+    $('#kezuModBtn').addEventListener('click', () => exportDashboardModules('#kezuExportWrap', '最佳科组排名看板_' + (yr || '')));
 
     function draw() {
       const y = parseInt($('#kezuRankYr').value, 10);
@@ -2470,34 +2480,170 @@
     return '<span class="tag warn">未达标</span>';
   }
 
-  // 将 DOM 元素导出为 PNG（本地 vendor/html2canvas.min.js）
+  // —— 仪表盘图片导出：整体导出 + 按模块分别导出，所见即所得 ——
+  // 关键点（保真）：① 克隆节点并把 Chart.js 的 <canvas> 替换为「实时位图快照 <img>」，
+  //    避免克隆导致画布变空白；② await document.fonts.ready 确保 web 字体已加载；
+  //    ③ 用元素「真实 computed 背景色」而非写死白底，浅/深色主题均一致；④ scale:2 保证清晰度。
+  const XP_HEADER = '.section-h, .section-h-flex, .sub-h';
+  function xpFontsReady() { if (document.fonts && document.fonts.ready) { try { return document.fonts.ready; } catch (e) {} } return Promise.resolve(); }
+  function xpFullWidth(el) {
+    let w = Math.max(el.scrollWidth, el.offsetWidth);
+    el.querySelectorAll('table').forEach(t => { w = Math.max(w, t.scrollWidth, t.offsetWidth); });
+    return Math.ceil(w) + 2;
+  }
+  function xpComputedBg(el) {
+    let bg = getComputedStyle(el).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = getComputedStyle(document.body).backgroundColor;
+    if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#ffffff';
+    return bg;
+  }
+  function xpIsSubstantial(el) { return !!(el.querySelector && el.querySelector('.gauge-grid, .stat-grid, .table-wrap, .chart-box, canvas, table, img')); }
+  // 含按钮但无实质可视内容的「控件行」在分模块时跳过（避免把按钮行导出成空白模块）
+  function xpShouldSkip(el) { return !!(el.querySelector && el.querySelector('button')) && !xpIsSubstantial(el); }
+  function xpHeaderText(el) {
+    const h = el.querySelector('.section-h');
+    if (h) return h.textContent.trim();
+    return (el.textContent || '').replace(/导出图片|⬇/g, '').replace(/\s+/g, ' ').trim() || '模块';
+  }
+  function xpLeafName(el) {
+    if (el.querySelector && el.querySelector('.gauge-grid')) return '核心指标仪表盘';
+    if (el.querySelector && el.querySelector('.stat-grid')) return '生产指标概览';
+    const hasCanvas = !!(el.querySelector && el.querySelector('canvas'));
+    const hasTable = !!(el.querySelector && el.querySelector('table, .table-wrap'));
+    if (hasCanvas && hasTable) return '横向对比';
+    if (hasCanvas) return '图表';
+    if (hasTable) return '数据明细';
+    return '概览';
+  }
+  // 将 origNodes 中每个节点的 canvas 实时位图快照，替换进对应的克隆节点（index 对齐）
+  function xpSnapshotInto(origNodes, clonedWrap) {
+    origNodes.forEach((n, idx) => {
+      const c = clonedWrap.children[idx];
+      if (!c) return;
+      const oc = n.querySelectorAll('canvas');
+      const cc = c.querySelectorAll('canvas');
+      oc.forEach((o, i) => {
+        const cv = cc[i]; if (!cv) return;
+        try {
+          const img = document.createElement('img');
+          img.src = o.toDataURL('image/png');
+          const w = o.clientWidth || o.width, h = o.clientHeight || o.height;
+          img.style.width = w + 'px'; img.style.height = h + 'px';
+          img.width = o.width; img.height = o.height;
+          cv.parentNode.replaceChild(img, cv);
+        } catch (e) { /* tainted canvas 等异常时保留空白，不影响其余 */ }
+      });
+    });
+  }
+  function xpPrepare(cloned, fullWidth, bg) {
+    cloned.style.width = fullWidth + 'px';
+    cloned.querySelectorAll('.table-wrap').forEach(tw => { tw.style.overflow = 'visible'; });
+    cloned.querySelectorAll('button').forEach(b => { b.style.visibility = 'hidden'; });
+  }
+  function xpDownload(canvas, filename) {
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+  async function xpCaptureEl(el, filename, fullWidth, bg) {
+    await xpFontsReady();
+    const clone = el.cloneNode(true);
+    xpSnapshotInto([el], clone);
+    xpPrepare(clone, fullWidth, bg);
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:' + bg + ';padding:0;z-index:-1;';
+    holder.appendChild(clone);
+    document.body.appendChild(holder);
+    try {
+      const canvas = await html2canvas(clone, { scale: 2, backgroundColor: bg, useCORS: true, logging: false, width: fullWidth, windowWidth: fullWidth });
+      xpDownload(canvas, filename);
+      return canvas;
+    } finally { if (holder.parentNode) document.body.removeChild(holder); }
+  }
+  async function xpCaptureNodes(nodes, filename, fullWidth, bg) {
+    await xpFontsReady();
+    const wrap = document.createElement('div');
+    wrap.style.width = fullWidth + 'px';
+    nodes.forEach(n => wrap.appendChild(n.cloneNode(true)));
+    xpSnapshotInto(nodes, wrap);
+    xpPrepare(wrap, fullWidth, bg);
+    const holder = document.createElement('div');
+    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:' + bg + ';padding:0;z-index:-1;';
+    holder.appendChild(wrap);
+    document.body.appendChild(holder);
+    try {
+      const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: bg, useCORS: true, logging: false, width: fullWidth, windowWidth: fullWidth });
+      xpDownload(canvas, filename);
+      return canvas;
+    } finally { if (holder.parentNode) document.body.removeChild(holder); }
+  }
+  // 递归收集「模块」：以 .section-h/.section-h-flex/.sub-h 为模块标题，聚合其后续兄弟（直至下一个标题）；
+  // 遇到内含标题的容器（如 #wcBody、#kezuRankResult）则下沉递归；控件行（含按钮且无实质内容）跳过；
+  // 前置且无标题的内容块（仪表盘卡片/统计卡）作为「概览」模块。
+  function xpCollectModules(root) {
+    const out = [];
+    function walk(container, into) {
+      const kids = Array.from(container.children);
+      let group = null;
+      for (const el of kids) {
+        if (xpShouldSkip(el)) { if (group) { into.push(group); group = null; } continue; }
+        if (el.matches && el.matches(XP_HEADER)) {
+          if (group) into.push(group);
+          group = { name: xpHeaderText(el), nodes: [el] };
+        } else if (el.querySelector && el.querySelector(XP_HEADER)) {
+          if (group) { into.push(group); group = null; }
+          walk(el, into);
+        } else {
+          if (!group) {
+            if (xpIsSubstantial(el)) group = { name: xpLeafName(el), nodes: [] };
+            else continue;
+          }
+          group.nodes.push(el);
+        }
+      }
+      if (group && group.nodes.length) into.push(group);
+    }
+    walk(root, out);
+    return out;
+  }
+  // 导出整体（保留原签名，供各看板「整体图片」按钮调用）
   function exportElementImage(sel, filename) {
     const el = $(sel);
     if (!el) { toast('未找到要导出的元素'); return Promise.resolve(); }
     if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return Promise.resolve(); }
     toast('正在生成图片…');
-    // 计算完整内容宽度：宽表可能超出视口，需取内部 table 的真实宽度
-    let fullWidth = Math.max(el.scrollWidth, el.offsetWidth);
-    const innerTable = el.querySelector('table');
-    if (innerTable) fullWidth = Math.max(fullWidth, innerTable.scrollWidth, innerTable.offsetWidth);
-    fullWidth = Math.ceil(fullWidth) + 2;
-    // 克隆到离屏容器，解除宽度/overflow 约束，保证整表渲染（避免只截到可视部分）
-    const clone = el.cloneNode(true);
-    clone.style.width = fullWidth + 'px';
-    clone.querySelectorAll('.table-wrap').forEach(tw => { tw.style.overflow = 'visible'; });
-    clone.querySelectorAll('button').forEach(b => { b.style.visibility = 'hidden'; });
-    const holder = document.createElement('div');
-    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:#ffffff;padding:0;z-index:-1;';
-    holder.appendChild(clone);
-    document.body.appendChild(holder);
-    return html2canvas(clone, { scale: 2, backgroundColor: '#ffffff', useCORS: true, logging: false, width: fullWidth, windowWidth: fullWidth }).then(canvas => {
-      if (holder.parentNode) document.body.removeChild(holder);
-      const a = document.createElement('a');
-      a.href = canvas.toDataURL('image/png');
-      a.download = filename || '看板.png';
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      toast('图片已导出');
-    }).catch(err => { if (holder.parentNode) document.body.removeChild(holder); toast('导出失败：' + (err && err.message ? err.message : String(err))); });
+    const fullWidth = xpFullWidth(el);
+    const bg = xpComputedBg(el);
+    return xpCaptureEl(el, filename, fullWidth, bg)
+      .then(() => toast('图片已导出'))
+      .catch(err => { toast('导出失败：' + (err && err.message ? err.message : String(err))); });
+  }
+  // 导出整体 + 按模块分别导出（多个独立 PNG）
+  async function exportDashboardModules(sel, baseName) {
+    const root = $(sel);
+    if (!root) { toast('未找到要导出的元素'); return; }
+    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return; }
+    const modules = xpCollectModules(root);
+    if (!modules.length) { toast('当前看板暂无可导出的模块'); return; }
+    toast('正在生成图片（整体 + ' + modules.length + ' 个模块）…');
+    const fullWidth = xpFullWidth(root);
+    const bg = xpComputedBg(root);
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+    const sanitize = s => (s || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_').slice(0, 40);
+    try {
+      await xpCaptureEl(root, baseName + '.png', fullWidth, bg);
+      await delay(150);
+      for (let i = 0; i < modules.length; i++) {
+        const m = modules[i];
+        const name = sanitize(m.name) || ('模块' + (i + 1));
+        await xpCaptureNodes(m.nodes, baseName + '_' + (i + 1) + '_' + name + '.png', fullWidth, bg);
+        await delay(150);
+      }
+      toast('已导出 ' + (modules.length + 1) + ' 张图片（整体 + 各模块）');
+    } catch (err) {
+      toast('导出失败：' + (err && err.message ? err.message : String(err)));
+    }
   }
 
   // 生成并下载「科组周度实际数据」Excel 模板（标准表头，与 parseActualFile 对齐）
