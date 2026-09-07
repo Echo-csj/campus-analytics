@@ -1108,7 +1108,7 @@
   function renderSatDashboard() {
     const monthly = getMonthlyRecords();
     const data = AGG.satisfactionFromMonthEnd(monthly);
-    let html = '<div class="row" style="margin-bottom:12px"><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div>';
+    let html = '<div id="satExportWrap"><div class="row" style="margin-bottom:12px;justify-content:space-between"><div><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div><div><button class="btn sm" id="satImgBtn">⬇ 导出图片</button></div></div>';
     html += '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」（月度数据体系）的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
     if (!data.length) html += '<div class="empty">尚无月度周报数据。请先在「数据源」页从周报生成各月月度数据。</div>';
@@ -1124,8 +1124,10 @@
       });
       html += '</tbody></table></div>';
     }
+    html += '</div>';
     $('#dashBody').innerHTML = html;
     $('#satExportBtn').addEventListener('click', () => exportSatDashboard(monthly));
+    $('#satImgBtn').addEventListener('click', () => exportElementImage('#satExportWrap', '五项满意度看板.png'));
     if (data.length) {
       const labels = data.map(r => r.year + '/' + r.month);
       const ds = SCHEMA.satisfactionItems.map((it, idx) => ({
@@ -1792,7 +1794,12 @@
       const gapText = v => v <= 0 ? '<span class="tag ok">已达成</span>' : '<span class="num" style="font-weight:600">' + fmt(v) + '</span>';
 
       const rtLabel = '校区实时完成率' + (hasData ? '（截至第' + latestPulledWeek + '周）' : '');
-      let h = '<div class="stat-grid" style="margin:6px 0 14px">' +
+      const maxW = Math.max(...rows.map(r => r.w), 0);
+      const actuals = STORE.list('kezuActual').filter(r => r.year === pm.year && r.month === pm.month);
+      const trackTable = maxW > 0
+        ? kezuTargetWideTableHTML(res, actuals, state.C)
+        : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
+      let h = '<div id="dtExportWrap"><div class="stat-grid" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
@@ -1801,28 +1808,19 @@
         '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
-        '</div>';
-
-      const maxW = Math.max(...rows.map(r => r.w), 0);
-      const actuals = STORE.list('kezuActual').filter(r => r.year === pm.year && r.month === pm.month);
-      const trackTable = maxW > 0
-        ? kezuTargetWideTableHTML(res, actuals, state.C)
-        : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
-      const hasTrack = maxW > 0 && actuals.length > 0;
-      h += '<div id="dtExportWrap">' +
+        '</div>' +
         '<div class="section-h-flex">' +
           '<div class="section-h">科组月度汇总（按周展开）</div>' +
-          (hasTrack ? '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' : '') +
+          '<button class="btn sm" id="dtExportImg">⬇ 导出图片</button>' +
         '</div>' +
         '<div id="dtTrackPanel">' + trackTable + '</div>' +
       '</div>';
       $('#dtResult').innerHTML = h;
-      if (hasTrack) {
-        $('#dtExportImg').addEventListener('click', () => {
-          const btn = $('#dtExportImg'); if (btn) btn.style.visibility = 'hidden';
-          exportElementImage('#dtExportWrap', '科组月度汇总_' + pm.year + '_' + pm.month + '.png').then(() => { if (btn) btn.style.visibility = ''; });
-        });
-      }
+      const dtImgBtn = $('#dtExportImg');
+      if (dtImgBtn) dtImgBtn.addEventListener('click', () => {
+        dtImgBtn.style.visibility = 'hidden';
+        exportElementImage('#dtExportWrap', '科组生产预测_' + pm.year + '_' + pm.month + '.png').then(() => { dtImgBtn.style.visibility = ''; });
+      });
     }
 
     fillMonths();
@@ -1866,13 +1864,14 @@
     const years = AGG.yearOptions(monthly);
     if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」页从周报生成各月月度数据（校区层单一源头为周报）。</div>'; return; }
     const yr = Math.max(...years);
-    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashYr">' +
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="yrImgBtn">⬇ 导出图片</button></div></div>';
     html += '<div id="ydashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashYr').addEventListener('change', () => drawYearDash());
     $('#yrExportBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportYearDashboard(recs, y); });
+    $('#yrImgBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportElementImage('#ydashResult', '年度汇总看板_' + y + '.png'); });
     drawYearDash();
 
     function drawYearDash() {
@@ -1952,13 +1951,14 @@
     const years = AGG.yearOptions(monthly);
     if (!years.length) { $('#dashBody').innerHTML = '<div class="empty">暂无数据。请先在「数据源」页从周报生成各月月度数据（校区层单一源头为周报）。</div>'; return; }
     const yr = Math.max(...years);
-    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="dashQYr">' +
+    let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashQYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="qImgBtn">⬇ 导出图片</button></div></div>';
     html += '<div id="qdashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashQYr').addEventListener('change', () => drawQuarterDash());
     $('#qExportBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportQuarterDashboard(recs, y); });
+    $('#qImgBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportElementImage('#qdashResult', '季度对比看板_' + y + '.png'); });
     drawQuarterDash();
 
     function drawQuarterDash() {
@@ -2067,13 +2067,15 @@
     const defYear = hasCurYear ? cur.year : (years.length ? years[years.length - 1] : cur.year);
 
     let mode = 'weekly';
-    const html = '<div class="dash-tabs" id="wcModeTabs" style="margin-bottom:12px">' +
+    const html = '<div class="row" style="margin-bottom:12px;justify-content:flex-end"><button class="btn sm" id="wcImgBtn">⬇ 导出图片</button></div>' +
+      '<div class="dash-tabs" id="wcModeTabs" style="margin-bottom:12px">' +
       '<button class="dash-tab active" data-mode="weekly">月度的周数据对比</button>' +
       '<button class="dash-tab" data-mode="monthly">月度数据对比</button>' +
       '</div>' +
       '<div id="wcResult"></div>';
     $('#dashBody').innerHTML = html;
 
+    $('#wcImgBtn').addEventListener('click', () => exportElementImage('#wcResult', '周报对比看板.png'));
     const tabs = $('#wcModeTabs');
     tabs.addEventListener('click', e => {
       if (!e.target.matches('.dash-tab')) return;
@@ -2244,23 +2246,28 @@
       return;
     }
 
-    let html = '';
+    let html = '<div id="kezuExportWrap">';
+    let yr = '';
     // 排名部分：依赖评比汇总数据（bestkezu_score）
     if (scoreRecs.length) {
       const years = scoreRecs.map(r => r.year).filter(y => y).sort((a, b) => b - a);
-      const yr = years[0];
-      html += '<div class="row" style="margin-bottom:16px;align-items:flex-end"><div class="field"><label>年份</label><select id="kezuRankYr">' +
+      yr = years[0];
+      html += '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap"><div class="field"><label>年份</label><select id="kezuRankYr">' +
         years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-        '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>';
+        '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>' +
+        '<div><button class="btn sm" id="kezuImgBtn">⬇ 导出图片</button></div></div>';
       html += '<div id="kezuRankResult"></div>';
     } else {
       html += '<div class="preview-note" style="margin-bottom:12px">⚠ 当前仅有科组月度明细，缺少「最佳科组评比汇总」(Sheet5)，暂无法呈现季度/全年排名；下方为可用的横向对比数据。</div>';
+      html += '<div class="row" style="margin-bottom:16px;justify-content:flex-end"><button class="btn sm" id="kezuImgBtn">⬇ 导出图片</button></div>';
     }
     // 横向对比部分：依赖科组月度明细（bestkezu），与排名互不耦合
     if (monthly.length) {
       html += '<div id="kezuCmpDashWrap"></div>';
     }
+    html += '</div>';
     $('#dashBody').innerHTML = html;
+    $('#kezuImgBtn').addEventListener('click', () => exportElementImage('#kezuExportWrap', '最佳科组排名看板_' + (yr || '') + '.png'));
 
     function draw() {
       const y = parseInt($('#kezuRankYr').value, 10);

@@ -10,7 +10,7 @@
   if (typeof window !== 'undefined' && window.document && window.document.write) {
     try {
       if (!(window.App && window.App.kezuCompute)) {
-        document.write('<script src="js/kezu-compute.js?v=20260906l"><\/script>');
+        document.write('<script src="js/kezu-compute.js?v=20260907a"><\/script>');
       }
     } catch (e) {}
   }
