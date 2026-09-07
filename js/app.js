@@ -1108,7 +1108,7 @@
   function renderSatDashboard() {
     const monthly = getMonthlyRecords();
     const data = AGG.satisfactionFromMonthEnd(monthly);
-    let html = '<div id="satExportWrap"><div class="row" style="margin-bottom:12px;justify-content:space-between"><div><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div><div style="display:flex;gap:8px"><button class="btn sm" id="satImgBtn">⬇ 整体图片</button><button class="btn sm" id="satModBtn">⬇ 分模块</button></div></div>';
+    let html = '<div id="satExportWrap"><div class="row" style="margin-bottom:12px;justify-content:space-between"><div><button class="btn sm" id="satExportBtn">⬇ 导出 Excel</button></div><div style="display:flex;gap:8px"><button class="btn sm" id="satDashBtn">⬇ 导出仪表盘</button></div></div>';
     html += '<div class="section-h">五项满意度（月度，自动从月度周报提取）</div>';
     html += '<div class="panel-desc">取每月「月度周报」（月度数据体系）的月口径率：续费单科率 / 结课单科率 / 退费单科率 / 停课人数率 / 推荐单科率。</div>';
     if (!data.length) html += '<div class="empty">尚无月度周报数据。请先在「数据源」页从周报生成各月月度数据。</div>';
@@ -1127,8 +1127,7 @@
     html += '</div>';
     $('#dashBody').innerHTML = html;
     $('#satExportBtn').addEventListener('click', () => exportSatDashboard(monthly));
-    $('#satImgBtn').addEventListener('click', () => exportElementImage('#satExportWrap', '五项满意度看板.png'));
-    $('#satModBtn').addEventListener('click', () => exportDashboardModules('#satExportWrap', '五项满意度看板'));
+    $('#satDashBtn').addEventListener('click', () => exportElementImage('#satExportWrap', '五项满意度看板.png'));
     if (data.length) {
       const labels = data.map(r => r.year + '/' + r.month);
       const ds = SCHEMA.satisfactionItems.map((it, idx) => ({
@@ -1800,7 +1799,7 @@
       const trackTable = maxW > 0
         ? kezuTargetWideTableHTML(res, actuals, state.C)
         : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
-      let h = '<div id="dtExportWrap"><div class="stat-grid" style="margin:6px 0 14px">' +
+      let h = '<div id="dtExportWrap"><div class="stat-grid" id="dtDashGauge" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
@@ -1812,20 +1811,15 @@
         '</div>' +
         '<div class="section-h-flex">' +
           '<div class="section-h">科组月度汇总（按周展开）</div>' +
-          '<div style="display:flex;gap:8px"><button class="btn sm" id="dtExportImg">⬇ 整体图片</button><button class="btn sm" id="dtModBtn">⬇ 分模块</button></div>' +
+          '<div style="display:flex;gap:8px"><button class="btn sm" id="dtDashBtn">⬇ 导出仪表盘</button></div>' +
         '</div>' +
         '<div id="dtTrackPanel">' + trackTable + '</div>' +
       '</div>';
       $('#dtResult').innerHTML = h;
-      const dtImgBtn = $('#dtExportImg');
-      if (dtImgBtn) dtImgBtn.addEventListener('click', () => {
-        dtImgBtn.style.visibility = 'hidden';
-        exportElementImage('#dtExportWrap', '科组生产预测_' + pm.year + '_' + pm.month + '.png').then(() => { dtImgBtn.style.visibility = ''; });
-      });
-      const dtModBtn = $('#dtModBtn');
-      if (dtModBtn) dtModBtn.addEventListener('click', () => {
-        dtModBtn.style.visibility = 'hidden';
-        exportDashboardModules('#dtExportWrap', '科组生产预测_' + pm.year + '_' + pm.month).then(() => { dtModBtn.style.visibility = ''; });
+      const dtDashBtn = $('#dtDashBtn');
+      if (dtDashBtn) dtDashBtn.addEventListener('click', () => {
+        dtDashBtn.style.visibility = 'hidden';
+        exportElementImage('#dtDashGauge', '科组生产预测_' + pm.year + '_' + pm.month + '.png').then(() => { dtDashBtn.style.visibility = ''; });
       });
     }
 
@@ -1872,13 +1866,12 @@
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="yrImgBtn">⬇ 整体图片</button><button class="btn sm" id="yrModBtn">⬇ 分模块</button></div></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="yrExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="yrDashBtn">⬇ 导出仪表盘</button></div></div>';
     html += '<div id="ydashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashYr').addEventListener('change', () => drawYearDash());
     $('#yrExportBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportYearDashboard(recs, y); });
-    $('#yrImgBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportElementImage('#ydashResult', '年度汇总看板_' + y + '.png'); });
-    $('#yrModBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportDashboardModules('#ydashResult', '年度汇总看板_' + y); });
+    $('#yrDashBtn').addEventListener('click', () => { const y = parseInt($('#dashYr').value, 10); exportElementImage('#ydashGauge', '年度汇总看板_' + y + '.png'); });
     drawYearDash();
 
     function drawYearDash() {
@@ -1904,7 +1897,7 @@
         gaugeCard('年度离职率', pct(v.quitMonthRate), '', v.quitMonthRate != null ? v.quitMonthRate * 100 : null, 'var(--red)'),
         gaugeCard('当前教师人数', fmt(v.teacherCount), '人', null, null),
       ];
-      let h = '<div class="gauge-grid gauges-5">' + gauges.join('') + '</div>';
+      let h = '<div class="gauge-grid gauges-5" id="ydashGauge">' + gauges.join('') + '</div>';
       // 缺失月份提示
       let note = '数据来源：' + y + '年 ' + (yd.sourceMonths.length ? yd.sourceMonths.map(m => m + '月').join('、') : '无') + ' 月度周报。';
       if (yd.missingMonths.length) note += ' <span class="warn-cell">⚠ 缺 ' + yd.missingMonths.map(m => m + '月').join('、') + '，结果可能不完整。</span>';
@@ -1960,13 +1953,12 @@
     const yr = Math.max(...years);
     let html = '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div class="field"><label>年份</label><select id="dashQYr">' +
       years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
-      '<div style="display:flex;gap:8px"><button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="qImgBtn">⬇ 整体图片</button><button class="btn sm" id="qModBtn">⬇ 分模块</button></div></div>';
+      '<div style="display:flex;gap:8px"><button class="btn sm" id="qExportBtn">⬇ 导出 Excel</button><button class="btn sm" id="qDashBtn">⬇ 导出仪表盘</button></div></div>';
     html += '<div id="qdashResult"></div>';
     $('#dashBody').innerHTML = html;
     $('#dashQYr').addEventListener('change', () => drawQuarterDash());
     $('#qExportBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportQuarterDashboard(recs, y); });
-    $('#qImgBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportElementImage('#qdashResult', '季度对比看板_' + y + '.png'); });
-    $('#qModBtn').addEventListener('click', () => { const y = parseInt($('#dashQYr').value, 10); exportDashboardModules('#qdashResult', '季度对比看板_' + y); });
+    $('#qDashBtn').addEventListener('click', () => exportQuarterDashboards());
     drawQuarterDash();
 
     function drawQuarterDash() {
@@ -1994,7 +1986,7 @@
           gaugeCard('Q' + q.quarter + '离职率', pct(v.quitMonthRate), '', v.quitMonthRate != null ? v.quitMonthRate * 100 : null, 'var(--red)'),
           gaugeCard('Q' + q.quarter + '当前教师人数', fmt(v.teacherCount), '人', null, null),
         ];
-        h += '<div class="qtr-block"><div class="qtr-head">Q' + q.quarter + (q.missingMonths.length ? ' <span class="tag warn">缺' + q.missingMonths.map(m => m + '月').join('') + '</span>' : '') + '</div><div class="gauge-grid gauges-5">' + gauges.join('') + '</div></div>';
+        h += '<div class="qtr-block" data-q="' + q.quarter + '"><div class="qtr-head">Q' + q.quarter + (q.missingMonths.length ? ' <span class="tag warn">缺' + q.missingMonths.map(m => m + '月').join('') + '</span>' : '') + '</div><div class="gauge-grid gauges-5">' + gauges.join('') + '</div></div>';
       });
       // 对比图表
       h += '<div class="section-h">各季度指标对比</div>';
@@ -2075,7 +2067,7 @@
     const defYear = hasCurYear ? cur.year : (years.length ? years[years.length - 1] : cur.year);
 
     let mode = 'weekly';
-    const html = '<div class="row" style="margin-bottom:12px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="wcImgBtn">⬇ 整体图片</button><button class="btn sm" id="wcModBtn">⬇ 分模块</button></div></div>' +
+    const html = '<div class="row" style="margin-bottom:12px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="wcDashBtn">⬇ 导出仪表盘</button></div></div>' +
       '<div class="dash-tabs" id="wcModeTabs" style="margin-bottom:12px">' +
       '<button class="dash-tab active" data-mode="weekly">月度的周数据对比</button>' +
       '<button class="dash-tab" data-mode="monthly">月度数据对比</button>' +
@@ -2083,8 +2075,7 @@
       '<div id="wcResult"></div>';
     $('#dashBody').innerHTML = html;
 
-    $('#wcImgBtn').addEventListener('click', () => exportElementImage('#wcResult', '周报对比看板.png'));
-    $('#wcModBtn').addEventListener('click', () => exportDashboardModules('#wcResult', '周报对比看板'));
+    $('#wcDashBtn').addEventListener('click', () => exportElementImage('#wcBody', '周报对比看板.png'));
     const tabs = $('#wcModeTabs');
     tabs.addEventListener('click', e => {
       if (!e.target.matches('.dash-tab')) return;
@@ -2264,11 +2255,11 @@
       html += '<div class="row" style="margin-bottom:16px;align-items:flex-end;justify-content:space-between"><div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap"><div class="field"><label>年份</label><select id="kezuRankYr">' +
         years.map(y => '<option value="' + y + '"' + (y === yr ? ' selected' : '') + '>' + y + '年</option>').join('') + '</select></div>' +
         '<div class="preview-note" style="margin-left:8px">数据来源：最佳科组评比汇总（季度排名 / 全年累计排名）。含「总分」的评分表按总分降序并标记最佳科组。</div></div>' +
-        '<div style="display:flex;gap:8px"><button class="btn sm" id="kezuImgBtn">⬇ 整体图片</button><button class="btn sm" id="kezuModBtn">⬇ 分模块</button></div></div>';
+        '<div style="display:flex;gap:8px"><button class="btn sm" id="kezuDashBtn">⬇ 导出仪表盘</button></div></div>';
       html += '<div id="kezuRankResult"></div>';
     } else {
       html += '<div class="preview-note" style="margin-bottom:12px">⚠ 当前仅有科组月度明细，缺少「最佳科组评比汇总」(Sheet5)，暂无法呈现季度/全年排名；下方为可用的横向对比数据。</div>';
-      html += '<div class="row" style="margin-bottom:16px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="kezuImgBtn">⬇ 整体图片</button><button class="btn sm" id="kezuModBtn">⬇ 分模块</button></div></div>';
+      html += '<div class="row" style="margin-bottom:16px;justify-content:flex-end"><div style="display:flex;gap:8px"><button class="btn sm" id="kezuDashBtn">⬇ 导出仪表盘</button></div></div>';
     }
     // 横向对比部分：依赖科组月度明细（bestkezu），与排名互不耦合
     if (monthly.length) {
@@ -2276,8 +2267,7 @@
     }
     html += '</div>';
     $('#dashBody').innerHTML = html;
-    $('#kezuImgBtn').addEventListener('click', () => exportElementImage('#kezuExportWrap', '最佳科组排名看板_' + (yr || '') + '.png'));
-    $('#kezuModBtn').addEventListener('click', () => exportDashboardModules('#kezuExportWrap', '最佳科组排名看板_' + (yr || '')));
+    $('#kezuDashBtn').addEventListener('click', () => exportElementImage('#kezuExportWrap', '最佳科组排名看板_' + (yr || '') + '.png'));
 
     function draw() {
       const y = parseInt($('#kezuRankYr').value, 10);
@@ -2643,6 +2633,27 @@
         await delay(150);
       }
       toast('已导出 ' + (modules.length + 1) + ' 张图片（整体 + 各模块）');
+    } catch (err) {
+      toast('导出失败：' + (err && err.message ? err.message : String(err)));
+    }
+  }
+
+  // 季度看板：按 Q1、Q2… 每个季度分别导出一张仪表盘图片
+  async function exportQuarterDashboards() {
+    const root = $('#qdashResult');
+    if (!root) { toast('未找到要导出的元素'); return; }
+    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return; }
+    const blocks = Array.from(root.querySelectorAll('.qtr-block[data-q]'));
+    if (!blocks.length) { toast('当前年份暂无可导出的季度仪表盘'); return; }
+    toast('正在导出 ' + blocks.length + ' 个季度仪表盘（Q1–Q' + blocks.length + '）…');
+    const delay = ms => new Promise(r => setTimeout(r, ms));
+    try {
+      for (let i = 0; i < blocks.length; i++) {
+        const q = blocks[i].getAttribute('data-q') || (i + 1);
+        await xpCaptureEl(blocks[i], '季度对比看板_Q' + q + '.png', xpFullWidth(blocks[i]), xpComputedBg(blocks[i]));
+        await delay(150);
+      }
+      toast('已导出 ' + blocks.length + ' 张季度仪表盘图片');
     } catch (err) {
       toast('导出失败：' + (err && err.message ? err.message : String(err)));
     }
