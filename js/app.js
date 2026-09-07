@@ -2473,8 +2473,7 @@
   // —— 仪表盘图片导出：整体导出 + 按模块分别导出，所见即所得 ——
   // 关键点（保真）：① 克隆节点并把 Chart.js 的 <canvas> 替换为「实时位图快照 <img>」，
   //    避免克隆导致画布变空白；② await document.fonts.ready 确保 web 字体已加载；
-  //    ③ 用元素「真实 computed 背景色」而非写死白底，浅/深色主题均一致；④ scale:2 保证清晰度。
-  const XP_HEADER = '.section-h, .section-h-flex, .sub-h';
+    //    ③ 用元素「真实 computed 背景色」而非写死白底，浅/深色主题均一致；④ scale:2 保证清晰度。
   function xpFontsReady() { if (document.fonts && document.fonts.ready) { try { return document.fonts.ready; } catch (e) {} } return Promise.resolve(); }
   function xpFullWidth(el) {
     let w = Math.max(el.scrollWidth, el.offsetWidth);
@@ -2486,24 +2485,6 @@
     if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = getComputedStyle(document.body).backgroundColor;
     if (!bg || bg === 'rgba(0, 0, 0, 0)' || bg === 'transparent') bg = '#ffffff';
     return bg;
-  }
-  function xpIsSubstantial(el) { return !!(el.querySelector && el.querySelector('.gauge-grid, .stat-grid, .table-wrap, .chart-box, canvas, table, img')); }
-  // 含按钮但无实质可视内容的「控件行」在分模块时跳过（避免把按钮行导出成空白模块）
-  function xpShouldSkip(el) { return !!(el.querySelector && el.querySelector('button')) && !xpIsSubstantial(el); }
-  function xpHeaderText(el) {
-    const h = el.querySelector('.section-h');
-    if (h) return h.textContent.trim();
-    return (el.textContent || '').replace(/导出图片|⬇/g, '').replace(/\s+/g, ' ').trim() || '模块';
-  }
-  function xpLeafName(el) {
-    if (el.querySelector && el.querySelector('.gauge-grid')) return '核心指标仪表盘';
-    if (el.querySelector && el.querySelector('.stat-grid')) return '生产指标概览';
-    const hasCanvas = !!(el.querySelector && el.querySelector('canvas'));
-    const hasTable = !!(el.querySelector && el.querySelector('table, .table-wrap'));
-    if (hasCanvas && hasTable) return '横向对比';
-    if (hasCanvas) return '图表';
-    if (hasTable) return '数据明细';
-    return '概览';
   }
   // 将 origNodes 中每个节点的 canvas 实时位图快照，替换进对应的克隆节点（index 对齐）
   function xpSnapshotInto(origNodes, clonedWrap) {
@@ -2553,53 +2534,7 @@
       return canvas;
     } finally { if (holder.parentNode) document.body.removeChild(holder); }
   }
-  async function xpCaptureNodes(nodes, filename, fullWidth, bg) {
-    await xpFontsReady();
-    const wrap = document.createElement('div');
-    wrap.style.width = fullWidth + 'px';
-    nodes.forEach(n => wrap.appendChild(n.cloneNode(true)));
-    xpSnapshotInto(nodes, wrap);
-    xpPrepare(wrap, fullWidth, bg);
-    const holder = document.createElement('div');
-    holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:' + bg + ';padding:0;z-index:-1;';
-    holder.appendChild(wrap);
-    document.body.appendChild(holder);
-    try {
-      const canvas = await html2canvas(wrap, { scale: 2, backgroundColor: bg, useCORS: true, logging: false, width: fullWidth, windowWidth: fullWidth });
-      xpDownload(canvas, filename);
-      return canvas;
-    } finally { if (holder.parentNode) document.body.removeChild(holder); }
-  }
-  // 递归收集「模块」：以 .section-h/.section-h-flex/.sub-h 为模块标题，聚合其后续兄弟（直至下一个标题）；
-  // 遇到内含标题的容器（如 #wcBody、#kezuRankResult）则下沉递归；控件行（含按钮且无实质内容）跳过；
-  // 前置且无标题的内容块（仪表盘卡片/统计卡）作为「概览」模块。
-  function xpCollectModules(root) {
-    const out = [];
-    function walk(container, into) {
-      const kids = Array.from(container.children);
-      let group = null;
-      for (const el of kids) {
-        if (xpShouldSkip(el)) { if (group) { into.push(group); group = null; } continue; }
-        if (el.matches && el.matches(XP_HEADER)) {
-          if (group) into.push(group);
-          group = { name: xpHeaderText(el), nodes: [el] };
-        } else if (el.querySelector && el.querySelector(XP_HEADER)) {
-          if (group) { into.push(group); group = null; }
-          walk(el, into);
-        } else {
-          if (!group) {
-            if (xpIsSubstantial(el)) group = { name: xpLeafName(el), nodes: [] };
-            else continue;
-          }
-          group.nodes.push(el);
-        }
-      }
-      if (group && group.nodes.length) into.push(group);
-    }
-    walk(root, out);
-    return out;
-  }
-  // 导出整体（保留原签名，供各看板「整体图片」按钮调用）
+  // 将指定 DOM 元素导出为 PNG（所见即所得：克隆节点 + 图表 canvas 实时快照 + 真实背景 + scale:2）
   function exportElementImage(sel, filename) {
     const el = $(sel);
     if (!el) { toast('未找到要导出的元素'); return Promise.resolve(); }
@@ -2611,33 +2546,6 @@
       .then(() => toast('图片已导出'))
       .catch(err => { toast('导出失败：' + (err && err.message ? err.message : String(err))); });
   }
-  // 导出整体 + 按模块分别导出（多个独立 PNG）
-  async function exportDashboardModules(sel, baseName) {
-    const root = $(sel);
-    if (!root) { toast('未找到要导出的元素'); return; }
-    if (typeof html2canvas === 'undefined') { toast('图片导出组件未加载，请刷新页面后重试'); return; }
-    const modules = xpCollectModules(root);
-    if (!modules.length) { toast('当前看板暂无可导出的模块'); return; }
-    toast('正在生成图片（整体 + ' + modules.length + ' 个模块）…');
-    const fullWidth = xpFullWidth(root);
-    const bg = xpComputedBg(root);
-    const delay = ms => new Promise(r => setTimeout(r, ms));
-    const sanitize = s => (s || '').replace(/[\\/:*?"<>|]/g, '').replace(/\s+/g, '_').slice(0, 40);
-    try {
-      await xpCaptureEl(root, baseName + '.png', fullWidth, bg);
-      await delay(150);
-      for (let i = 0; i < modules.length; i++) {
-        const m = modules[i];
-        const name = sanitize(m.name) || ('模块' + (i + 1));
-        await xpCaptureNodes(m.nodes, baseName + '_' + (i + 1) + '_' + name + '.png', fullWidth, bg);
-        await delay(150);
-      }
-      toast('已导出 ' + (modules.length + 1) + ' 张图片（整体 + 各模块）');
-    } catch (err) {
-      toast('导出失败：' + (err && err.message ? err.message : String(err)));
-    }
-  }
-
   // 季度看板：按 Q1、Q2… 每个季度分别导出一张仪表盘图片
   async function exportQuarterDashboards() {
     const root = $('#qdashResult');
