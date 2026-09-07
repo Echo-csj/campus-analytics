@@ -2549,7 +2549,9 @@
   async function xpCaptureEl(el, filename, fullWidth, bg) {
     await xpFontsReady();
     const clone = el.cloneNode(true);
-    xpSnapshotInto([el], clone);
+    const snapWrap = document.createElement('div');
+    snapWrap.appendChild(clone);
+    xpSnapshotInto([el], snapWrap);
     xpPrepare(clone, fullWidth, bg);
     const holder = document.createElement('div');
     holder.style.cssText = 'position:fixed;left:-10000px;top:0;width:' + fullWidth + 'px;background:' + bg + ';padding:0;z-index:-1;';
