@@ -1808,7 +1808,17 @@
         '<div class="stat-card"><div class="k">校区生产 G1 差距课时</div><div class="v">' + (hasData ? gapText(gapG1) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 差距课时</div><div class="v">' + (hasData ? gapText(gapG2) : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G3 差距课时</div><div class="v">' + (hasData ? gapText(gapG3) : '<span class="muted">—</span>') + '</div></div>' +
-        '</div>' +
+          '</div>' +
+        '<div class="section-h">科组参考月单科及课时（来自最佳科组）</div>' +
+        '<div class="panel-desc">单科数 / 课时取自参考月「最佳科组」；周数为预测月自然周数。可在「科组生产指标」中编辑。</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>科组名称</th><th class="num">单科数</th><th class="num">上月课时</th><th class="num">周数</th></tr></thead><tbody>' +
+          depts.map(function (d) { return '<tr><td>' + esc(d.name) + '</td><td class="num">' + fmt(d.s) + '</td><td class="num">' + fmt(d.h) + '</td><td class="num">' + fmt(d.w) + '</td></tr>'; }).join('') +
+        '</tbody><tfoot><tr><td class="total-label">校区总计</td><td class="num">' + fmt(S) + '</td><td class="num">' + fmt(H) + '</td><td class="num">—</td></tr></tfoot></table></div>' +
+        '<div class="section-h">科组G1 / G2 / G3目标</div>' +
+        '<div class="panel-desc">完成率 = 四科组预测之和 / C；100%→G1，110%→G2，125%→G3。各档总盘 = C × 档位，按单科占比分解到每科组。</div>' +
+        '<div class="table-wrap"><table><thead><tr><th>科组</th><th class="num">单科数</th><th class="num">G1 目标（100%）</th><th class="num">G2 目标（110%）</th><th class="num">G3 目标（125%）</th></tr></thead><tbody>' +
+          rows.map(function (r) { return '<tr><td>' + esc(r.name) + '</td><td class="num">' + fmt(r.s) + '</td><td class="num">' + fmt(r.G1) + '</td><td class="num">' + fmt(r.G2) + '</td><td class="num">' + fmt(r.G3) + '</td></tr>'; }).join('') +
+        '</tbody><tfoot><tr><td class="total-label">校区总计</td><td class="num">' + fmt(S) + '</td><td class="num">' + fmt(state.C * Gcfg.G1) + '</td><td class="num">' + fmt(state.C * Gcfg.G2) + '</td><td class="num">' + fmt(state.C * Gcfg.G3) + '</td></tr></tfoot></table></div>' +
         '<div class="section-h-flex">' +
           '<div class="section-h">科组月度汇总（按周展开）</div>' +
           '<div style="display:flex;gap:8px"><button class="btn sm" id="dtDashBtn">⬇ 导出仪表盘</button></div>' +
@@ -2708,7 +2718,7 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">科组输入（来自最佳科组，可编辑）</div>
+        <div class="panel-title">科组参考月单科及课时（来自最佳科组，可编辑）</div>
         <div class="panel-desc">单科数 / 课时取自参考月「最佳科组」；周数默认为【预测月】的自然周数（用于周度分解），可微调。可增删科组或在表格内直接修改。</div>
         <div id="tDeptWrap"></div>
         <div class="row" style="margin-top:12px">
@@ -2729,7 +2739,7 @@
       </div>
 
       <div class="panel">
-        <div class="panel-title">⑤ G1 / G2 / G3 倒推目标（每科组）</div>
+        <div class="panel-title">科组G1 / G2 / G3目标</div>
         <div class="panel-desc">完成率 = 四科组预测之和 / C；100%→G1，110%→G2，125%→G3。各档总盘 = C × 档位，按单科占比分解到每科组。</div>
         <div id="tGWrap"></div>
       </div>
