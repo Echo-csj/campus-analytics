@@ -317,6 +317,17 @@
     applyRemote: applyRemote
   };
 
+  // 暴露给 auth-gate.js（全屏登录门）：统一走 App.sync 接口；
+  // 并补一个 router.resolve，让门禁解锁后刷新应用（优先 CA.app.refresh）。
+  global.App = global.App || {};
+  global.App.sync = CA.sync;
+  global.App.router = {
+    resolve: function () {
+      try { if (global.CA && global.CA.app && typeof global.CA.app.refresh === 'function') global.CA.app.refresh(); }
+      catch (e) {}
+    }
+  };
+
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
   else start();
 })(window);
