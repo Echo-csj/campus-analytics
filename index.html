@@ -11,8 +11,36 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="styles.css?v=20260913a" />
+  <style>
+    /* 全屏登录门禁：未登录锁定整个应用 */
+    body.auth-locked { overflow: hidden; }
+    body.auth-locked #app { display: none !important; }
+    #auth-gate { position: fixed; inset: 0; z-index: 1000; display: none; align-items: center; justify-content: center;
+      background: linear-gradient(160deg, #fafafa, #eef0f4); }
+    body.auth-locked #auth-gate { display: flex; }
+    .ag-card { width: 360px; max-width: 92vw; background: #fff; border: 1px solid #e4e4e7; border-radius: 14px;
+      padding: 28px 26px; box-shadow: 0 10px 40px rgba(15, 23, 42, .10); font-family: Inter, system-ui, -apple-system, sans-serif; }
+    .ag-brand { display: flex; gap: 12px; align-items: center; margin-bottom: 20px; }
+    .ag-mark { width: 38px; height: 38px; border-radius: 10px; background: #4F46E5; color: #fff; display: flex; align-items: center; justify-content: center; font-weight: 700; }
+    .ag-title { font-weight: 600; color: #18181b; }
+    .ag-sub { font-size: 12px; color: #71717a; }
+    .ag-form { display: flex; flex-direction: column; gap: 12px; }
+    .ag-fld { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #3f3f46; }
+    .ag-fld input { height: 40px; border: 1px solid #d4d4d8; border-radius: 8px; padding: 0 12px; font-size: 14px; outline: none; }
+    .ag-fld input:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79, 70, 229, .15); }
+    .ag-rem { font-size: 12px; color: #71717a; display: flex; gap: 6px; align-items: center; }
+    .ag-btn { position: relative; height: 42px; border: 0; border-radius: 8px; background: #4F46E5; color: #fff; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .ag-btn:disabled { opacity: .7; cursor: default; }
+    .ag-btn.loading { pointer-events: none; }
+    .ag-btn.success { background: #16a34a; }
+    .ag-spinner { width: 16px; height: 16px; border: 2px solid rgba(255, 255, 255, .5); border-top-color: #fff; border-radius: 50%; animation: agspin .7s linear infinite; }
+    @keyframes agspin { to { transform: rotate(360deg); } }
+    .ag-err { color: #dc2626; font-size: 13px; }
+    .ag-ok { color: #16a34a; font-size: 13px; }
+    .ag-offline { color: #71717a; font-size: 13px; line-height: 1.6; }
+  </style>
 </head>
-<body>
+<body class="auth-locked">
   <div id="app">
     <aside class="sidebar">
       <div class="brand">
@@ -52,6 +80,33 @@
 
   <div id="toast" class="toast"></div>
 
+  <!-- 全屏登录门禁（未登录时锁定整个应用） -->
+  <div id="auth-gate">
+    <div class="ag-card">
+      <div class="ag-brand">
+        <div class="ag-mark">分</div>
+        <div>
+          <div class="ag-title">教学数据分析工作台</div>
+          <div class="ag-sub">泉山校区 · 登录后使用</div>
+        </div>
+      </div>
+      <form id="ag-form" class="ag-form" onsubmit="return false">
+        <label class="ag-fld"><span>邮箱</span><input id="ag-email" type="email" autocomplete="username" placeholder="you@school.edu"></label>
+        <label class="ag-fld"><span>密码</span><input id="ag-pass" type="password" autocomplete="current-password" placeholder="••••••••"></label>
+        <label class="ag-rem"><input id="ag-remember" type="checkbox"> 记住邮箱</label>
+        <button id="ag-login" class="ag-btn" type="button">
+          <span class="ag-spinner" style="display:none"></span>
+          <span class="ag-btn-label">登录</span>
+        </button>
+        <div id="ag-err" class="ag-err" style="display:none"></div>
+        <div id="ag-ok" class="ag-ok" style="display:none"></div>
+      </form>
+      <div id="ag-offline" class="ag-offline" style="display:none">
+        未配置云端同步（config.js 缺 SUPABASE_URL / ANON_KEY）。<br>本地数据仍可正常使用。
+      </div>
+    </div>
+  </div>
+
   <script src="vendor/xlsx.full.min.js?v=20260913a"></script>
   <script src="vendor/chart.umd.js?v=20260913a"></script>
   <script src="js/schema.js?v=20260913a"></script>
@@ -62,7 +117,7 @@
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script src="js/config.js?v=20260913a"></script>
   <script src="js/kezu-compute.js?v=20260913a"></script>
-  <script src="js/sync.js?v=20260829t"></script>
+  <script src="js/sync.js?v=20260912b"></script>
   <script src="js/kezu-schema.js?v=20260913a"></script>
   <script src="js/kezu-parser.js?v=20260913a"></script>
   <script src="js/parser.js?v=20260913a"></script>
@@ -72,5 +127,6 @@
   <script src="js/sample-data.js?v=20260913a"></script>
   <script src="vendor/html2canvas.min.js?v=20260913a"></script>
   <script src="js/app.js?v=20260913a"></script>
+  <script src="js/auth-gate.js?v=20260912b"></script>
 </body>
 </html>
