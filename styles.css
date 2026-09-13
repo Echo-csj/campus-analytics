@@ -65,6 +65,11 @@ body {
 .hint { color: var(--text-3); font-size: 12px; }
 .hint.small { font-size: 11px; margin-top: 2px; }
 
+/* 侧栏账户区：登录态/退出移入左侧栏底部（原为右上角悬浮条，会遮挡内容） */
+.sidebar-foot .sf-mail { font-size: 12px; color: var(--text-2, #71717a); padding: 2px 4px 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-foot .sf-logout { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 8px 12px; margin-top: 2px; border: 1px solid var(--border, #ececec); border-radius: var(--radius-sm, 8px); background: var(--bg, #fff); color: var(--indigo, #4F46E5); font-size: 13px; font-weight: 500; cursor: pointer; }
+.sidebar-foot .sf-logout:hover { background: var(--bg-subtle, #f4f4f5); color: var(--red, #dc2626); }
+
 /* Main */
 .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .topbar {

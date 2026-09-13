@@ -301,6 +301,18 @@
       return;
     }
     var user = session && session.user && session.user.email ? session.user.email : '已同步';
+    var foot = el('auth-foot');
+    if (foot) {
+      // 登录态/退出移入左侧栏底部账户区（不再用右上角悬浮条遮挡内容）
+      w.style.display = 'none';
+      foot.innerHTML = '<div class="sf-mail">' + user + ' · 已同步</div>' +
+        '<button id="sync-push" class="sf-logout">推送分析到个人台</button>' +
+        '<button id="sync-out" class="sf-logout">退出登录</button>';
+      el('sync-push').onclick = pushSharedSnapshot;
+      el('sync-out').onclick = signOut;
+      return;
+    }
+    w.style.display = '';
     w.innerHTML = '<div class="sw-box"><span class="sw-dot green"></span>' +
       '<span class="sw-user">' + user + ' · 已同步</span>' +
       '<button id="sync-push" class="sw-btn small">推送分析到个人台</button>' +
