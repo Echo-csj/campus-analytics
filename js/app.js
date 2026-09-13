@@ -1645,13 +1645,15 @@
   // 返回 { data, error }（与 supabase-js functions.invoke 一致）；data = { ok, rows, errors }。
   async function callKeshiFetch(month, week) {
     const cfg = global.APP_CONFIG || {};
-    if (!cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) {
-      throw new Error('未配置 Supabase（config.js 缺少 SUPABASE_URL / ANON_KEY）');
+    // 边缘函数（fetch-keshi）仍走云项目：通过 EDGE_URL 指定，缺省回退到 SUPABASE_URL。
+    const edgeUrl = (cfg.EDGE_URL || cfg.SUPABASE_URL || '').replace(/\/$/, '');
+    if (!edgeUrl || !cfg.SUPABASE_ANON_KEY) {
+      throw new Error('未配置边缘函数地址（config.js 缺少 EDGE_URL / SUPABASE_URL）');
     }
     if (!global.supabase || !global.supabase.createClient) {
       throw new Error('Supabase SDK 未加载，请刷新页面或检查网络');
     }
-    const client = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+    const client = global.supabase.createClient(edgeUrl, cfg.SUPABASE_ANON_KEY);
     const secret = cfg.KESHI_FETCH_SECRET || '';
     const fn = cfg.KESHI_FUNCTION || 'fetch-keshi';
     return client.functions.invoke(fn, {
