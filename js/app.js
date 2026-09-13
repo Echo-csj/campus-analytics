@@ -1799,7 +1799,9 @@
       const trackTable = maxW > 0
         ? kezuTargetWideTableHTML(res, actuals, state.C)
         : '<div class="preview-note">请先在「科组生产指标」中确认科组周数，再上传实际数据生成汇总表。</div>';
-      let h = '<div id="dtExportWrap"><div class="stat-grid" id="dtDashGauge" style="margin:6px 0 14px">' +
+      let h = '<div id="dtExportWrap">' +
+        '<div class="section-h-flex"><div class="section-h">科组生产预测仪表盘</div><div style="display:flex;gap:8px"><button class="btn sm" id="dtGaugeBtn">⬇ 导出仪表盘</button></div></div>' +
+        '<div class="stat-grid" id="dtDashGauge" style="margin:6px 0 14px">' +
         '<div class="stat-card"><div class="k">校区生产指标 C</div><div class="v">' + fmt(state.C) + '</div></div>' +
         '<div class="stat-card"><div class="k">当前1V1人数</div><div class="v">' + (latestV1 != null ? fmt(latestV1) + ' 人' : '<span class="muted">—</span>') + '</div></div>' +
         '<div class="stat-card"><div class="k">校区生产 G2 指标</div><div class="v" style="color:#7c3aed">' + fmt(state.C * 1.10) + '</div></div>' +
@@ -1821,15 +1823,20 @@
         '</tbody><tfoot><tr><td class="total-label">校区总计</td><td class="num">' + fmt(S) + '</td><td class="num">' + fmt(state.C * Gcfg.G1) + '</td><td class="num">' + fmt(state.C * Gcfg.G2) + '</td><td class="num">' + fmt(state.C * Gcfg.G3) + '</td></tr></tfoot></table></div>' +
         '<div class="section-h-flex">' +
           '<div class="section-h">科组月度汇总（按周展开）</div>' +
-          '<div style="display:flex;gap:8px"><button class="btn sm" id="dtDashBtn">⬇ 导出仪表盘</button></div>' +
+          '<div style="display:flex;gap:8px"><button class="btn sm" id="dtTrackBtn">⬇ 导出汇总表</button></div>' +
         '</div>' +
         '<div id="dtTrackPanel">' + trackTable + '</div>' +
       '</div>';
       $('#dtResult').innerHTML = h;
-      const dtDashBtn = $('#dtDashBtn');
-      if (dtDashBtn) dtDashBtn.addEventListener('click', () => {
-        dtDashBtn.style.visibility = 'hidden';
-        exportElementImage('#dtDashGauge', '科组生产预测_' + pm.year + '_' + pm.month + '.png').then(() => { dtDashBtn.style.visibility = ''; });
+      const dtGaugeBtn = $('#dtGaugeBtn');
+      if (dtGaugeBtn) dtGaugeBtn.addEventListener('click', () => {
+        dtGaugeBtn.style.visibility = 'hidden';
+        exportElementImage('#dtDashGauge', '科组生产预测_仪表盘_' + pm.year + '_' + pm.month + '.png').then(() => { dtGaugeBtn.style.visibility = ''; });
+      });
+      const dtTrackBtn = $('#dtTrackBtn');
+      if (dtTrackBtn) dtTrackBtn.addEventListener('click', () => {
+        dtTrackBtn.style.visibility = 'hidden';
+        exportElementImage('#dtTrackPanel', '科组生产预测_月度汇总_' + pm.year + '_' + pm.month + '.png').then(() => { dtTrackBtn.style.visibility = ''; });
       });
     }
 
