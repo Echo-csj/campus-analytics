@@ -35,10 +35,38 @@
     try { renderWidget(); } catch (e) {}
     statusListeners.forEach(function (f) { try { f(s, msg); } catch (e) {} });
   }
+  // 带「超时 + 指数退避重试」的 fetch，注入 Supabase 客户端。
+  // 目的：缓解校园网到 supabase.dosworkbench.top 的 TLS 握手偶发被重置（Connection reset）。
+  // 仅在网络层失败（连接被重置 / 超时）时重试；HTTP 响应（含 4xx/5xx）一律不重试，避免重复写入。
+  function makeResilientFetch(timeoutMs, maxRetries) {
+    return function (input, init) {
+      var attempt = 0;
+      function run() {
+        attempt++;
+        var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timer = controller ? setTimeout(function () { try { controller.abort(); } catch (e) {} }, timeoutMs) : null;
+        var init2 = init || {};
+        if (controller && !init2.signal) init2.signal = controller.signal;
+        return fetch(input, init2).then(function (res) {
+          if (timer) clearTimeout(timer);
+          return res;
+        }, function (err) {
+          if (timer) clearTimeout(timer);
+          if (attempt <= maxRetries) {
+            var delay = Math.min(800 * Math.pow(2, attempt - 1), 5000);
+            return new Promise(function (resolve) { setTimeout(resolve, delay); }).then(run);
+          }
+          throw err;
+        });
+      }
+      return run();
+    };
+  }
+  var resilientFetch = makeResilientFetch(10000, 3);
   function ensureClient() {
     if (disabled || client) return client;
     if (global.supabase && global.supabase.createClient) {
-      client = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
+      client = global.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY, { fetch: resilientFetch });
     } else {
       console.error('[sync] Supabase JS SDK 未加载，请检查网络、CDN 可访问性或广告拦截插件');
     }
