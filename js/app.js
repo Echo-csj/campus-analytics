@@ -1734,7 +1734,7 @@
         return;
       }
       const pm = predMonth(state.year, state.month);
-      const predWeeks = AGG.manualMonthWeekCount(pm.year, pm.month);
+      const predWeeks = App.kezuCompute.getWeekOverride(pm.year, pm.month) || AGG.manualMonthWeekCount(pm.year, pm.month);
       depts.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
       $('#dtPred').value = pm.year + ' 年 ' + pm.month + ' 月';
       const res = computeKezuTarget(depts, state.C);
@@ -2719,6 +2719,10 @@
           <div class="field"><label>参考年份</label><select id="tYearSel" class="mono"></select></div>
           <div class="field"><label>参考月份（上月数据）</label><select id="tMonthSel" class="mono"></select></div>
         </div>
+        <div class="row" style="margin:4px 0 2px;align-items:flex-end;gap:14px;flex-wrap:wrap">
+          <div class="field" style="margin:0"><label>预测月周数（可覆盖）</label><input type="number" id="tWeeks" class="mono" min="1" max="6" step="1" value="4"></div>
+          <div class="field-note" id="tWeeksNote" style="margin:0"></div>
+        </div>
         <div id="tConsist" class="field-note"></div>
         <div class="row" style="margin-top:10px">
           <button class="btn" id="tLoad">↻ 读入该月科组数据</button>
@@ -3232,14 +3236,24 @@
     }
     function loadCurrentMonth() {
       const loaded = loadMonth(state.year, state.month);
+      const pm = predMonth(state.year, state.month);
+      state.pm = pm;
       if (loaded) {
-        const pm = predMonth(state.year, state.month);
-        const predWeeks = AGG.manualMonthWeekCount(pm.year, pm.month);
-        loaded.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
+        const predWeeks = App.kezuCompute.getWeekOverride(pm.year, pm.month) || AGG.manualMonthWeekCount(pm.year, pm.month);
+        loaded.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数（可经「预测月周数」覆盖），不再沿用参考月
         state.depts = loaded; toast('已读入 ' + loaded.length + ' 个科组（' + state.year + ' 年 ' + state.month + ' 月）');
       }
       else { state.depts = []; toast(state.year ? '「最佳科组」' + state.year + ' 年 ' + state.month + ' 月 暂无数据' : '暂无「最佳科组」数据，请先到「最佳科组」上传月度数据'); }
-      renderDeptInputs(); recompute();
+      renderDeptInputs(); recompute(); refreshWeeksInput();
+    }
+    function refreshWeeksInput() {
+      const el = document.getElementById('tWeeks'); if (!el) return;
+      const pm = state.pm || predMonth(state.year, state.month);
+      const ov = App.kezuCompute.getWeekOverride(pm.year, pm.month);
+      const def = AGG.manualMonthWeekCount(pm.year, pm.month);
+      el.value = (ov != null) ? ov : def;
+      const note = document.getElementById('tWeeksNote');
+      if (note) note.innerHTML = '作用于预测月 <b>' + pm.year + ' 年 ' + pm.month + ' 月</b>' + (ov != null ? '（已覆盖算法值 ' + def + ' 周）' : '（算法值 ' + def + ' 周，可手动调整）');
     }
 
     // 初始化：默认参考月随当前日期自动推进（AGG.kezuTargetFrame），预测 = 当前人工月；
@@ -3271,6 +3285,17 @@
     $('#tAdd').addEventListener('click', () => { state.depts.push({ name: '新科组', s: 1, h: 0, w: 4 }); renderDeptInputs(); recompute(); });
     $('#tCopy').addEventListener('click', () => copyText(exportFinal()));
     $('#tCsv').addEventListener('click', () => downloadCSV(exportFinal()));
+    const twEl = document.getElementById('tWeeks');
+    if (twEl) twEl.addEventListener('input', () => {
+      const pm = state.pm || predMonth(state.year, state.month);
+      let v = parseInt(twEl.value, 10);
+      if (!isFinite(v) || v < 1) { App.kezuCompute.setWeekOverride(pm.year, pm.month, null); }
+      else { App.kezuCompute.setWeekOverride(pm.year, pm.month, v); }
+      const ov = App.kezuCompute.getWeekOverride(pm.year, pm.month);
+      const w = (ov != null) ? ov : AGG.manualMonthWeekCount(pm.year, pm.month);
+      state.depts.forEach(d => { d.w = w; });
+      renderDeptInputs(); recompute(); refreshWeeksInput();
+    });
 
     // —— ⑧ 实际跟踪：上传每周实际数据 ——
     const atDrop = $('#at_drop'), atFile = $('#at_file');

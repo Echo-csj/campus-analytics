@@ -72,6 +72,23 @@
   }
   function predMonth(y, m) { var mm = m + 1, yy = y; if (mm > 12) { mm = 1; yy += 1; } return { year: yy, month: mm }; }
 
+  // 预测月周数「人工覆盖」：按预测月(year-month)存 localStorage，缺省回落 manualMonthWeekCount。
+  // 用于纠正人工月算法把跨月周错归邻月（如 10 月被算成 4 周，实为 5 周）的场景。
+  function getWeekOverride(y, m) {
+    try {
+      var o = JSON.parse(localStorage.getItem('ca_kezu_week_override') || '{}');
+      var v = o[y + '-' + m];
+      return (typeof v === 'number' && v >= 1) ? v : null;
+    } catch (e) { return null; }
+  }
+  function setWeekOverride(y, m, w) {
+    try {
+      var o = JSON.parse(localStorage.getItem('ca_kezu_week_override') || '{}');
+      if (w == null) delete o[y + '-' + m]; else o[y + '-' + m] = w;
+      localStorage.setItem('ca_kezu_week_override', JSON.stringify(o));
+    } catch (e) {}
+  }
+
   /* ---------- 科组生产指标核心算法（与核心看板 computeKezuTarget 一致） ---------- */
   function computeKezuTarget(depts, C) {
     var S = depts.reduce(function (a, d) { return a + (d.s || 0); }, 0);
@@ -258,7 +275,7 @@
       var key = y + '-' + m;
       if (!depts) { forecast[key] = { refYear: y, refMonth: m, empty: true }; return; }
       var pm = predMonth(y, m);
-      var predWeeks = manualMonthWeekCount(pm.year, pm.month);
+      var predWeeks = getWeekOverride(pm.year, pm.month) || manualMonthWeekCount(pm.year, pm.month);
       depts.forEach(function (d) { d.w = predWeeks; });
       if (C == null) {
         forecast[key] = {
@@ -345,7 +362,7 @@
 
   App.kezuCompute = {
     fmt: fmt, pct: pct, esc: esc, num: num, isNum: isNum, scoreCell: scoreCell,
-    manualLastDay: manualLastDay, manualMonthOf: manualMonthOf, manualMonthWeekCount: manualMonthWeekCount,
+    manualLastDay: manualLastDay, manualMonthOf: manualMonthOf, manualMonthWeekCount: manualMonthWeekCount, getWeekOverride: getWeekOverride, setWeekOverride: setWeekOverride,
     currentManualWeek: currentManualWeek, predMonth: predMonth,
     computeKezuTarget: computeKezuTarget, buildWideTableModel: buildWideTableModel,
     actualSummary: actualSummary, dataSourceProd: dataSourceProd, kezuQuarter: kezuQuarter,
