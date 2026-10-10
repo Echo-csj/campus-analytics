@@ -1675,7 +1675,8 @@
   //   每月周次 = 该自然月内「周日」的个数，跨月溢出周归属下月第 1 周
   //   （例如 9/28–10/4 这一周在页面上属于「10 月第 1 周」，因此 9 月只有第 1–4 周，不存在第 5 周）。
   function attributedWeeksForMonth(Y, m) {
-    const N = AGG.manualMonthWeekCount(Y, m); // 该月实际周数 = 自然月内周日个数（与页面选项一致）
+    // 该月实际周数：优先用「预测月周数覆盖」（如 10 月被算法算成 4 周、实为 5 周），缺省回落人工月算法
+    const N = App.kezuCompute.getWeekOverride(Y, m) || AGG.manualMonthWeekCount(Y, m);
     const list = [];
     for (let k = 1; k <= N; k++) list.push({ src: { y: Y, m: m, w: k }, attr: { y: Y, mo: m, wk: k } });
     return list;
@@ -2783,10 +2784,11 @@
         </div>
         <div class="panel-sub" style="margin-bottom:12px;border:1px dashed #c7d2fe;background:#eef2ff;padding:10px 12px;border-radius:10px">
           <div class="panel-title" style="margin-bottom:4px">🛰 从 91paike 系统拉取（自动登录）</div>
-          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。「拉取全部周次」按人工月规则（周度为自然周、周日为周/月最后一天；页面按「周日所属自然月」标注周次，跨月溢出周归属下月第 1 周，故 9 月只有 1–4 周）自动拉取当月全部周次。</div>
+          <div class="panel-desc" style="margin-bottom:8px">输入月份与周次，点「拉取」由后台云端函数自动登录 91paike 并抓取科组实际数据，无需手动导出 Excel。账号密码仅存于云端函数密钥，不进前端、不进仓库。「拉取全部周次」按「周数（可覆盖）」或人工月规则（周度为自然周、周日为周/月最后一天；页面按「周日所属自然月」标注周次，跨月溢出周归属下月第 1 周）自动拉取当月全部周次。<b>若某月被算少一周（如 10 月实为 5 周却只列 4 周），在「周数（可覆盖）」填实际周数即可拉全。</b></div>
           <div class="meta-row">
             <div class="field"><label>月份</label><input id="atKeshiMonth" class="mono" value="2026-09" style="width:120px" placeholder="YYYY-MM"></div>
             <div class="field"><label>周次（1=第1周…）</label><input id="atKeshiWeek" class="mono" value="1" style="width:90px"></div>
+            <div class="field"><label>周数（可覆盖）</label><input id="atKeshiWeeks" class="mono" value="4" style="width:90px"></div>
             <button class="btn primary" id="atKeshiBtn">🛰 拉取本周</button>
             <button class="btn" id="atKeshiAllBtn">🛰 拉取全部周次</button>
             <button class="btn ghost" id="atCleanBtn" title="清除旧版误存的「溢出周」（如 9 月第 5 周）脏数据，避免污染月度预排/实际求和">🧹 清理溢出周</button>
@@ -3187,7 +3189,7 @@
         let cleared = 0;
         months.forEach(k => {
           const p = k.split('-'); const yy = +p[0], mm = +p[1];
-          const N = AGG.manualMonthWeekCount(yy, mm);
+          const N = App.kezuCompute.getWeekOverride(yy, mm) || AGG.manualMonthWeekCount(yy, mm);
           STORE.list('kezuActual').filter(x => x.year === yy && x.month === mm && (x.week === 0 || x.week > N)).forEach(x => { STORE.remove('kezuActual', x.year, x.month, x.week, x.dimension); cleared++; });
         });
         toast(n + ' 条周度实际数据已入库（' + ym + '）' + (cleared ? '，并清理 ' + cleared + ' 条旧月度汇总记录' : ''));
@@ -3330,6 +3332,26 @@
         const km = $('#atKeshiMonth'); if (km) { const d = new Date(); km.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0'); }
         const kw = $('#atKeshiWeek'); if (kw) kw.value = '1';
       }
+      // 周数覆盖：默认按「预测月周数覆盖」或人工月算法填充；用户手动改后写入覆盖（与科组生产指标 tab 共用同一覆盖键 ca_kezu_week_override）
+      const keshiWeeksEl = $('#atKeshiWeeks');
+      function refreshKeshiWeeksDefault() {
+        const mm = ($('#atKeshiMonth').value || '').match(/^(\d{4})-(\d{1,2})$/);
+        if (!mm || !keshiWeeksEl) return;
+        const Y = +mm[1], M = +mm[2];
+        const ov = App.kezuCompute.getWeekOverride(Y, M);
+        keshiWeeksEl.value = (ov != null) ? ov : AGG.manualMonthWeekCount(Y, M);
+      }
+      refreshKeshiWeeksDefault();
+      if ($('#atKeshiMonth')) $('#atKeshiMonth').addEventListener('change', refreshKeshiWeeksDefault);
+      if (keshiWeeksEl) keshiWeeksEl.addEventListener('input', () => {
+        const mm = ($('#atKeshiMonth').value || '').match(/^(\d{4})-(\d{1,2})$/);
+        if (!mm) return;
+        const Y = +mm[1], M = +mm[2];
+        let v = parseInt(keshiWeeksEl.value, 10);
+        if (!isFinite(v) || v < 1) App.kezuCompute.setWeekOverride(Y, M, null);
+        else App.kezuCompute.setWeekOverride(Y, M, v);
+        const note = $('#atKeshiNote'); if (note) note.textContent = '已更新 ' + Y + '-' + String(M).padStart(2, '0') + ' 周数覆盖为 ' + v + ' 周（与科组生产指标共享）';
+      });
       if (keshiBtn) keshiBtn.addEventListener('click', async () => {
         const month = ($('#atKeshiMonth').value || '').trim();
         const week = parseInt($('#atKeshiWeek').value, 10) || 0;
@@ -3373,7 +3395,7 @@
             if (!data.ok) { errs.push('第' + (i + 1) + '步：' + (data.error || '返回失败')); break; }
             (data.errors || []).forEach(e => errs.push('第' + (i + 1) + '步：' + e));
             const rows = (data.rows || []).map(r => ({ ...r, year: step.attr.y, month: step.attr.mo, week: step.attr.wk }));
-            if (!rows.length) break; // 该周无数据，视为已到月末
+            if (!rows.length) continue; // 空周不中断：按声明的周数逐周拉取，空周视为暂无数据继续
             dbg.push(data.debug || '');
             all.push(...rows);
           }
@@ -3397,7 +3419,7 @@
       if (cleanBtn) cleanBtn.addEventListener('click', () => {
         const all = STORE.list('kezuActual');
         const Nof = {};
-        all.forEach(r => { const k = r.year + '-' + r.month; if (!(k in Nof)) Nof[k] = AGG.manualMonthWeekCount(r.year, r.month); });
+        all.forEach(r => { const k = r.year + '-' + r.month; if (!(k in Nof)) Nof[k] = App.kezuCompute.getWeekOverride(r.year, r.month) || AGG.manualMonthWeekCount(r.year, r.month); });
         let n = 0;
         all.forEach(r => {
           const N = Nof[r.year + '-' + r.month];
