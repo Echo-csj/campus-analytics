@@ -157,6 +157,14 @@
   // 真实月长应取各记录中最小的声明值，从而把超出者判定为脏数据过滤/清理。
   // 用于 latestV1 与周报对比看板过滤/清理异常周次，避免脏记录污染"最新一周"判定。
   function legitMaxWeek(recs) {
+    // 尊重「人工月周数覆盖」：用户已显式确认该月实际周数（如 10 月实为 5 周却因模板/日历算法只标 4 周），
+    // 覆盖值即权威上限，避免把覆盖出来的第5周误判为"月末周误标第5/6周"的脏数据而被过滤/删除。
+    // 无覆盖的月份仍走原 min(totalWeeksOfMonth / weekSeq) 逻辑，零回归。
+    const r0 = (recs || [])[0];
+    if (r0 && r0.year && r0.month) {
+      const ov = App.kezuCompute.getWeekOverride(r0.year, r0.month);
+      if (ov) return ov;
+    }
     const tots = (recs || []).map(r => r.values && r.values.totalWeeksOfMonth != null ? r.values.totalWeeksOfMonth : null).filter(x => x != null);
     if (tots.length) return Math.min.apply(null, tots);
     const seqs = (recs || []).map(r => r.values && r.values.weekSeq != null ? r.values.weekSeq : null).filter(x => x != null);
