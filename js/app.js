@@ -3086,75 +3086,9 @@
       detail += '</tbody></table></div>';
       if (!hasDetail) detail = '<div class="preview-note">预测月 ' + py + ' 年 ' + pm + ' 月 暂无实际上传数据。上传「周次 / 科组 / 实际预排 / 实际生产」表后，此处显示每周达成跟踪。</div>';
 
-      // 月度汇总宽表：科组 × 周次（W1~Wn）+ 月度预排/实际/完成率
-      const maxW = Math.max(...rows.map(r => r.w || 0), 0);
-      const wkIdx = [];
-      for (let i = 1; i <= maxW; i++) {
-        let weekTgt = 0, weekSched = 0, weekProd = 0;
-        rows.forEach(r => {
-          const rec = (r._list || []).find(x => x.week === i);
-          if (i <= (r.w || 0)) weekTgt += (r.weekly || 0);
-          weekSched += rec ? num(rec.values.scheduled) : 0;
-          weekProd += rec ? num(rec.values.produced) : 0;
-        });
-        wkIdx.push({ weekTgt, weekSched, weekProd });
-      }
-
+      // 月度汇总宽表：复用核心看板同一渲染逻辑（kezuTargetWideTableHTML），单一数据源、两 tab 一致
       let sum = '<div class="section-h">科组月度汇总（按周展开）</div>';
-      sum += '<div class="table-wrap"><table><thead>';
-      let sumHead = '<tr><th rowspan="2">科组</th>';
-      for (let i = 1; i <= maxW; i++) sumHead += '<th class="num" colspan="4">W' + i + '</th>';
-      sumHead += '<th class="num" rowspan="2">月度预排</th><th class="num" rowspan="2">月度实际</th><th class="num" rowspan="2">月度预排<br>完成率</th><th class="num" rowspan="2">月度实际<br>完成率</th></tr>';
-      let sumSubHead = '<tr>';
-      for (let i = 1; i <= maxW; i++) sumSubHead += '<th class="num">指标</th><th class="num">预排</th><th class="num">实际</th><th class="num">完成率</th>';
-      sumSubHead += '</tr>';
-      sum += sumHead + sumSubHead + '</thead><tbody>';
-
-      rows.forEach(r => {
-        let subjSched = 0, subjProd = 0;
-        let tr = '<tr><td>' + esc(r.name) + '</td>';
-        for (let i = 1; i <= maxW; i++) {
-          const rec = (r._list || []).find(x => x.week === i);
-          const hasWeek = i <= (r.w || 0);
-          const tgt = hasWeek ? (r.weekly || 0) : 0;
-          const sched = rec ? num(rec.values.scheduled) : 0;
-          const prod = rec ? num(rec.values.produced) : 0;
-          subjSched += sched; subjProd += prod;
-          const wkRate = (tgt > 0) ? prod / tgt : null;
-          tr += '<td class="num">' + (hasWeek ? fmt(tgt, 1) : '<span class="muted">—</span>') + '</td>' +
-            '<td class="num">' + (sched > 0 ? fmt(sched, 1) : '<span class="muted">—</span>') + '</td>' +
-            '<td class="num" style="font-weight:600">' + (prod > 0 ? fmt(prod, 1) : '<span class="muted">—</span>') + '</td>' +
-            '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
-        }
-        const preRate = r.final > 0 ? subjSched / r.final : null;
-        const actRate = r.final > 0 ? subjProd / r.final : null;
-        tr += '<td class="num">' + fmt(subjSched, 1) + '</td>' +
-          '<td class="num" style="font-weight:600">' + fmt(subjProd, 1) + '</td>' +
-          '<td class="num">' + (preRate == null ? '<span class="muted">—</span>' : pct(preRate)) + '</td>' +
-          '<td class="num">' + (actRate == null ? '<span class="muted">—</span>' : pct(actRate)) + '</td></tr>';
-        sum += tr;
-      });
-
-      let campusSched = 0, campusProd = 0;
-      rows.forEach(r => { (r._list || []).forEach(rec => { campusSched += num(rec.values.scheduled); campusProd += num(rec.values.produced); }); });
-      let tfoot = '<tr><td class="total-label">校区总计</td>';
-      for (let i = 1; i <= maxW; i++) {
-        const { weekTgt, weekSched, weekProd } = wkIdx[i - 1];
-        const wkRate = weekTgt > 0 ? weekProd / weekTgt : null;
-        tfoot += '<td class="num">' + fmt(weekTgt, 1) + '</td>' +
-          '<td class="num">' + fmt(weekSched, 1) + '</td>' +
-          '<td class="num" style="font-weight:600">' + fmt(weekProd, 1) + '</td>' +
-          '<td class="num">' + (wkRate == null ? '<span class="muted">—</span>' : pct(wkRate)) + '</td>';
-      }
-      const campusCVal = (typeof state.C === 'number' && isFinite(state.C)) ? state.C : campusFinal;
-      const campusPreRate = campusCVal > 0 ? campusSched / campusCVal : null;
-      const campusActRate = campusFinal > 0 ? campusProd / campusFinal : null;
-      tfoot += '<td class="num" style="font-weight:600">' + fmt(campusSched, 1) + '</td>' +
-        '<td class="num" style="font-weight:600">' + fmt(campusProd, 1) + '</td>' +
-        '<td class="num">' + (campusPreRate == null ? '<span class="muted">—</span>' : pct(campusPreRate)) + '</td>' +
-        '<td class="num">' + (campusActRate == null ? '<span class="muted">—</span>' : pct(campusActRate)) + '</td></tr>';
-      sum += '</tbody><tfoot>' + tfoot + '</tfoot></table></div>';
-      sum += '<div class="preview-note">月度预排完成率 = 月度预排 ÷ 月度生产指标；校区总计 = 校区月度预排 ÷ 校区生产指标 C。</div>';
+      sum += kezuTargetWideTableHTML(res, actuals, state.C);
 
       tw.innerHTML = top + detail + sum;
     }
