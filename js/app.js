@@ -3578,12 +3578,38 @@
       { q: '各核心指标月度走势', t: '核心指标走势' },
       { q: '最新一期率类指标构成', t: '率类指标构成' },
     ];
+    const dcfg = (CA.ai && CA.ai.getDirectConfig) ? CA.ai.getDirectConfig() : { enabled: false, baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-v4-flash', apiKey: '' };
+    const maskedKey = dcfg.apiKey ? (dcfg.apiKey.slice(0, 6) + '****' + dcfg.apiKey.slice(-4)) : '（未填写）';
+    const directStatus = (dcfg.enabled && dcfg.apiKey)
+      ? '<span class="tag good">直连已启用</span> 端点：' + esc(dcfg.baseUrl) + ' · 模型：' + esc(dcfg.model) + ' · Key：' + esc(maskedKey)
+      : '<span class="tag">直连未启用</span> 当前走' + ((CA.ai && CA.ai.edgeEnabled && CA.ai.edgeEnabled()) ? '云端 Edge' : '本地引擎') + '；填写配置并启用即可直连 Deepseek';
+    const directPanel =
+      '<div class="ai-direct" id="aiDirect">' +
+        '<div class="ai-direct-head">' +
+          '<div class="ai-direct-title">AI 模型接入 · 直连模式</div>' +
+          '<label class="ai-direct-toggle"><input type="checkbox" id="aiDirectOn"' + (dcfg.enabled ? ' checked' : '') + '> 启用（浏览器直连 LLM）</label>' +
+        '</div>' +
+        '<div class="ai-direct-body"' + (dcfg.enabled ? '' : ' style="display:none"') + ' id="aiDirectBody">' +
+          '<div class="ai-direct-row">' +
+            '<div class="field grow"><label>Base URL</label><input id="aiBase" value="' + esc(dcfg.baseUrl) + '" placeholder="https://api.deepseek.com/v1"></div>' +
+            '<div class="field"><label>模型</label><input id="aiModel" value="' + esc(dcfg.model) + '" placeholder="deepseek-v4-flash"></div>' +
+          '</div>' +
+          '<div class="field"><label>API Key</label><input id="aiKey" type="password" value="' + esc(dcfg.apiKey) + '" placeholder="sk-...（仅存本机浏览器）"></div>' +
+          '<div class="ai-direct-actions">' +
+            '<button class="btn primary" id="aiDirectSave">保存配置</button>' +
+            '<button class="btn ghost" id="aiDirectTest">测试连接</button>' +
+            '<span class="ai-direct-status" id="aiDirectStatus">' + directStatus + '</span>' +
+          '</div>' +
+          '<div class="preview-note">浏览器直接调用兼容 OpenAI 的端点（默认 Deepseek）。<b>仅限个人本地使用</b>：API Key 会出现在浏览器 Network 面板，请勿公开部署多用户。若浏览器跨域被拦（CORS），将自动降级为本地引擎并提示。</div>' +
+        '</div>' +
+      '</div>';
     const html =
       '<div class="ai-wrap">' +
         '<div class="ai-head">' +
           '<div class="ai-title">AI 数据分析</div>' +
-          '<div class="preview-note">用自然语言提问，自动识别数据特征并生成可视化图表与智能洞察（趋势预测 / 异常检测 / 关键指标摘要）。当前默认本地引擎，无需联网即可使用；配置云端 LLM 后能力更强。</div>' +
+          '<div class="preview-note">用自然语言提问，自动识别数据特征并生成可视化图表与智能洞察（趋势预测 / 异常检测 / 关键指标摘要）。默认本地引擎（无需联网）；可在「直连模式」启用 Deepseek 等云端 LLM，或在 config.js 开启云端 Edge。</div>' +
         '</div>' +
+        directPanel +
         '<div class="ai-controls">' +
           '<div class="field"><label>选择数据集</label><select id="aiDataset">' +
             datasets.map(d => '<option value="' + d.stream + '">' + esc(d.label) + (d.note ? '（' + esc(d.note) + '）' : '') + '</option>').join('') +
@@ -3607,6 +3633,53 @@
     btn.addEventListener('click', run);
     qEl.addEventListener('keydown', e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') run(); });
 
+    // —— 直连模式面板 ——
+    const directOn = $('#aiDirectOn'), directBody = $('#aiDirectBody');
+    if (directOn && directBody) {
+      directOn.addEventListener('change', () => { directBody.style.display = directOn.checked ? '' : 'none'; });
+      $('#aiDirectSave').addEventListener('click', () => {
+        const patch = {
+          enabled: directOn.checked,
+          baseUrl: ($('#aiBase').value || '').trim(),
+          model: ($('#aiModel').value || '').trim(),
+          apiKey: ($('#aiKey').value || '').trim(),
+        };
+        CA.ai.setDirectConfig(patch);
+        const d2 = CA.ai.getDirectConfig();
+        const masked = d2.apiKey ? (d2.apiKey.slice(0, 6) + '****' + d2.apiKey.slice(-4)) : '（未填写）';
+        $('#aiDirectStatus').innerHTML = (d2.enabled && d2.apiKey)
+          ? '<span class="tag good">直连已启用</span> 端点：' + esc(d2.baseUrl) + ' · 模型：' + esc(d2.model) + ' · Key：' + esc(masked)
+          : '<span class="tag">直连未启用</span>';
+        toast(d2.enabled && d2.apiKey ? '直连模式已保存并启用' : '直连配置已保存（未启用）');
+      });
+      $('#aiDirectTest').addEventListener('click', async () => {
+        const b = $('#aiDirectTest'); b.disabled = true; b.textContent = '测试中…';
+        const cfg = CA.ai.getDirectConfig();
+        const merged = Object.assign({}, cfg, {
+          enabled: directOn.checked,
+          baseUrl: ($('#aiBase').value || '').trim(),
+          model: ($('#aiModel').value || '').trim(),
+          apiKey: ($('#aiKey').value || '').trim(),
+        });
+        if (!merged.apiKey || !merged.baseUrl || !merged.model) {
+          $('#aiDirectStatus').innerHTML = '<span class="tag warn">配置不完整</span> 需填写 Base URL / 模型 / API Key';
+          b.disabled = false; b.textContent = '测试连接'; return;
+        }
+        try {
+          const res = await fetch(merged.baseUrl.replace(/\/$/, '') + '/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + merged.apiKey },
+            body: JSON.stringify({ model: merged.model, temperature: 0, max_tokens: 24, messages: [{ role: 'system', content: '你是测试助手。' }, { role: 'user', content: '只回复 JSON：{"ok":true}' }] }),
+          });
+          if (!res.ok) throw new Error('HTTP ' + res.status);
+          const j = await res.json();
+          $('#aiDirectStatus').innerHTML = '<span class="tag good">连接成功</span> 模型返回：' + esc(String((j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content) || '').slice(0, 48));
+        } catch (e) {
+          $('#aiDirectStatus').innerHTML = '<span class="tag warn">连接失败</span> ' + esc(String(e && e.message || e)) + '（多为 CORS 跨域拦截，浏览器直连可能被拦，分析时会自动降级本地）';
+        } finally { b.disabled = false; b.textContent = '测试连接'; }
+      });
+    }
+
     function run() {
       const query = qEl.value.trim();
       const stream = dsEl.value;
@@ -3628,9 +3701,11 @@
           '<div class="preview-note" style="margin-top:8px">提示：先到「数据源」上传 DOS 周报并生成月度数据，或到「科组生产指标」拉取实际数据，再来此分析。</div></div>';
         return;
       }
-      const srcBadge = r.meta && r.meta.degradedFromEdge
-        ? '<span class="tag warn">云端不可用·已降级本地</span>'
-        : (r.source === 'edge' ? '<span class="tag good">云端 LLM</span>' : '<span class="tag">本地引擎</span>');
+      const srcBadge = r.meta && r.meta.degradedFromDirect
+        ? '<span class="tag warn">直连不可用·已降级本地</span>'
+        : (r.meta && r.meta.degradedFromEdge
+          ? '<span class="tag warn">云端不可用·已降级本地</span>'
+          : (r.source === 'direct' ? '<span class="tag good">直连 LLM</span>' : (r.source === 'edge' ? '<span class="tag good">云端 LLM</span>' : '<span class="tag">本地引擎</span>')));
       let h = '<div class="ai-summary-card"><div class="ai-summary-head">分析摘要 ' + srcBadge + '</div><div class="ai-summary-body">' + esc(r.summary || '（无摘要）') + '</div></div>';
       // 洞察
       if (r.insights && r.insights.length) {

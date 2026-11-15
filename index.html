@@ -38,6 +38,21 @@
     .ag-err { color: #dc2626; font-size: 13px; }
     .ag-ok { color: #16a34a; font-size: 13px; }
     .ag-offline { color: #71717a; font-size: 13px; line-height: 1.6; }
+
+    /* AI 直连模式面板 */
+    .ai-direct { border: 1px solid #e4e4e7; border-radius: 12px; background: #fff; padding: 14px 16px; margin-bottom: 16px; box-shadow: 0 1px 2px rgba(15,23,42,.04); }
+    .ai-direct-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+    .ai-direct-title { font-weight: 600; color: #18181b; font-size: 14px; }
+    .ai-direct-toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #3f3f46; cursor: pointer; user-select: none; }
+    .ai-direct-toggle input { width: 16px; height: 16px; accent-color: #4F46E5; cursor: pointer; }
+    .ai-direct-body { margin-top: 14px; display: flex; flex-direction: column; gap: 12px; }
+    .ai-direct-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .ai-direct-row .field { min-width: 180px; }
+    .ai-direct-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .ai-direct-status { font-size: 12px; color: #52525b; }
+    .ai-direct input[type=text], .ai-direct input[type=password] { height: 38px; border: 1px solid #d4d4d8; border-radius: 8px; padding: 0 11px; font-size: 13px; outline: none; font-family: inherit; }
+    .ai-direct input[type=text]:focus, .ai-direct input[type=password]:focus { border-color: #4F46E5; box-shadow: 0 0 0 3px rgba(79,70,229,.15); }
+    .ai-direct .field.grow { flex: 1; }
   </style>
 </head>
 <body class="auth-locked">
@@ -123,11 +138,11 @@
   <script src="js/kezu-parser.js?v=20261010b"></script>
   <script src="js/parser.js?v=20261010b"></script>
   <script src="js/ai-engine.js?v=20261010b"></script>
-  <script src="js/ai-client.js?v=20261010b"></script>
+  <script src="js/ai-client.js?v=20261115a"></script>
   <script src="js/aggregate.js?v=20261010b"></script>
   <script src="js/sample-data.js?v=20261010b"></script>
   <script src="vendor/html2canvas.min.js?v=20261010b"></script>
-  <script src="js/app.js?v=20261114a"></script>
+  <script src="js/app.js?v=20261115a"></script>
   <script src="js/auth-gate.js?v=20261010b"></script>
 </body>
 </html>
