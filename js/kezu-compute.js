@@ -7,6 +7,7 @@
    ============================================ */
 (function () {
   var App = window.App || (window.App = {});
+  var CA = window.CA || (window.CA = {}); // 复用 aggregate 单一口径；本文件先于 aggregate.js 加载，故函数体内惰性引用 CA.aggregate（运行期必然已就绪）
 
   /* ---------- 工具 ---------- */
   function fmt(v, digits) {
@@ -36,36 +37,11 @@
     return esc(s);
   }
 
-  /* ---------- 人工月 / 周 日期助手（与 aggregate.js 口径完全一致） ---------- */
-  function manualLastDay(Y, m) {
-    var L = new Date(Y, m, 0);
-    var dow = L.getDay();
-    return new Date(L.getFullYear(), L.getMonth(), L.getDate() - dow);
-  }
-  function manualMonthOf(date) {
-    var Y = date.getFullYear(), m = date.getMonth() + 1;
-    var ML = manualLastDay(Y, m);
-    if (date <= ML) {
-      var pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
-      var prevML = manualLastDay(pY, pm0);
-      if (date > prevML) return { year: Y, month: m };
-      return { year: pY, month: pm0 };
-    }
-    var nY = Y, nm = m + 1; if (nm > 12) { nm = 1; nY = Y + 1; }
-    return { year: nY, month: nm };
-  }
-  function manualMonthWeekCount(Y, m) {
-    var pY = Y, pm0 = m - 1; if (pm0 < 1) { pm0 = 12; pY = Y - 1; }
-    var prevML = manualLastDay(pY, pm0);
-    var MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
-    var ML = manualLastDay(Y, m);
-    var diff = Math.round((ML - MS) / 86400000);
-    return (diff + 1) / 7;
-  }
+  /* ---------- 人工月 / 周 日期助手：统一委托 CA.aggregate（消除与 aggregate.js 的双份复制，单一口径防漂移） ---------- */
   function currentManualWeek(date) {
-    var mm = manualMonthOf(date);
+    var mm = CA.aggregate.manualMonthOf(date);
     var pY = mm.year, pm0 = mm.month - 1; if (pm0 < 1) { pm0 = 12; pY = mm.year - 1; }
-    var prevML = manualLastDay(pY, pm0);
+    var prevML = CA.aggregate.manualLastDay(pY, pm0);
     var MS = new Date(prevML.getFullYear(), prevML.getMonth(), prevML.getDate() + 1);
     var dayDiff = Math.round((date - MS) / 86400000);
     return { year: mm.year, month: mm.month, week: Math.floor(dayDiff / 7) + 1 };
@@ -156,42 +132,9 @@
     return { campusActual: campusActual, campusSched: campusSched, hasData: hasData };
   }
 
-  /* ---------- 季度聚合（与 aggregate.js kezuQuarter 一致） ---------- */
-  // 扁平化：把原始 bestkezu 记录 {dimension, values} 转成 subject/quarter 在顶层的结构（与核心看板/个人台 kezuFlat 一致）
+  /* ---------- 季度聚合：统一委托 aggregate.kezuQuarter（与 aggregate.js 单一口径，消除双份镜像实现） ---------- */
   function kezuFlat(rec) { return Object.assign({ year: rec.year, month: rec.month, subject: rec.dimension }, rec.values || {}); }
-  function kezuQuarter(rs) {
-    var byKey = {};
-    rs.forEach(function (r) {
-      var key = r.subject + '|' + r.quarter;
-      (byKey[key] = byKey[key] || []).push(r);
-    });
-    var out = [];
-    Object.keys(byKey).forEach(function (key) {
-      var g = byKey[key];
-      var parts = key.split('|');
-      var subj = parts[0], q = parts[1];
-      var sum = function (k) { return g.reduce(function (a, r) { return a + (r[k] || 0); }, 0); };
-      var n = g.length;
-      var totalHours = sum('hours'), totalWeeks = sum('weeks');
-      var avgSubjects = n ? sum('subjects') / n : 0;
-      var xf = sum('xufei'), jk = sum('jieke'), tf = sum('tuifei'), tk = sum('tingke'), qt = sum('quit');
-      var last = g.slice().sort(function (a, b) { return b.month - a.month; })[0];
-      var lastTeachers = last.teachers || 0;
-      out.push({
-        subject: subj, quarter: +q, totalHours: totalHours, totalWeeks: totalWeeks,
-        avgSubjects: Math.round(avgSubjects * 10) / 10,
-        quarterWeekAvg: (totalWeeks && avgSubjects) ? totalHours / totalWeeks / avgSubjects : null,
-        xf: xf, jk: jk, tf: tf, tk: tk, qt: qt,
-        xufeiRate: avgSubjects ? xf / avgSubjects : null,
-        jiekeRate: avgSubjects ? jk / avgSubjects : null,
-        tuifeiRate: (tf + avgSubjects) ? tf / (tf + avgSubjects) : null,
-        tingkeRate: (tk + avgSubjects) ? tk / (tk + avgSubjects) : null,
-        quitRate: (qt + lastTeachers) ? qt / (qt + lastTeachers) : null,
-        teachers: lastTeachers
-      });
-    });
-    return out.sort(function (a, b) { return a.subject.localeCompare(b.subject) || (a.quarter - b.quarter); });
-  }
+  function kezuQuarter(rs) { return CA.aggregate.kezuQuarter(rs); }
 
   /* ---------- 把「科组月度汇总（按周展开）」算成结构化模型（纯数值，个人台只做模板） ---------- */
   function buildWideTableModel(res, actuals, campusC) {
@@ -275,7 +218,7 @@
       var key = y + '-' + m;
       if (!depts) { forecast[key] = { refYear: y, refMonth: m, empty: true }; return; }
       var pm = predMonth(y, m);
-      var predWeeks = getWeekOverride(pm.year, pm.month) || manualMonthWeekCount(pm.year, pm.month);
+      var predWeeks = getWeekOverride(pm.year, pm.month) || CA.aggregate.manualMonthWeekCount(pm.year, pm.month);
       depts.forEach(function (d) { d.w = predWeeks; });
       if (C == null) {
         forecast[key] = {
@@ -310,7 +253,7 @@
       var reportWeek = 0;
       if (cw.year === pm.year && cw.month === pm.month) reportWeek = (today.getDay() === 0) ? cw.week : Math.max(1, cw.week - 1);
       else {
-        var pmEnd = manualLastDay(pm.year, pm.month);
+        var pmEnd = CA.aggregate.manualLastDay(pm.year, pm.month);
         if (today > pmEnd) reportWeek = currentManualWeek(pmEnd).week;
       }
       var done = actualSummary(actual, pm.year, pm.month, reportWeek);
@@ -362,7 +305,7 @@
 
   App.kezuCompute = {
     fmt: fmt, pct: pct, esc: esc, num: num, isNum: isNum, scoreCell: scoreCell,
-    manualLastDay: manualLastDay, manualMonthOf: manualMonthOf, manualMonthWeekCount: manualMonthWeekCount, getWeekOverride: getWeekOverride, setWeekOverride: setWeekOverride,
+    getWeekOverride: getWeekOverride, setWeekOverride: setWeekOverride,
     currentManualWeek: currentManualWeek, predMonth: predMonth,
     computeKezuTarget: computeKezuTarget, buildWideTableModel: buildWideTableModel,
     actualSummary: actualSummary, dataSourceProd: dataSourceProd, kezuQuarter: kezuQuarter,

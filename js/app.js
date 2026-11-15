@@ -1632,13 +1632,6 @@
     if (note) note.innerHTML = '已对 ' + y + '年' + m + '月 完成关联对账';
   }
 
-  function dataSourceProd(y, m) {
-    const me = getMonthlyRecords();
-    const rec = me.find(r => r.year === y && r.month === m);
-    if (!rec) return null;
-    const v = rec.values && rec.values.v1MonthProduced;
-    return (typeof v === 'number' && isFinite(v)) ? v : null;
-  }
 
   // —— 两套数据源体系：月度数据(monthly 流) 的获取 ——
   // 月度数据 = 每月最后一周周报，是 季度/年度/满意度/数据库视图/科组月度跟踪 的唯一来源。
@@ -1691,19 +1684,6 @@
   }
 
   function renderKezuTargetDash() {
-    function actualSummary(py, pm, uptoWeek) {
-      const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
-      let campusActual = 0, campusSched = 0, hasData = false;
-      actuals.forEach(r => {
-        const w = +r.week || 0;
-        if (uptoWeek == null || w <= uptoWeek) {
-          campusActual += num(r.values && r.values.produced);
-          campusSched += num(r.values && r.values.scheduled);
-          hasData = true;
-        }
-      });
-      return { campusActual, campusSched, hasData };
-    }
 
     const months = kezuMonths();
     // 月份推进：以当前日期(人工月)为锚（AGG.kezuTargetFrame），预测月自动指向当前人工月，
@@ -1746,7 +1726,7 @@
       const predWeeks = App.kezuCompute.getWeekOverride(pm.year, pm.month) || AGG.manualMonthWeekCount(pm.year, pm.month);
       depts.forEach(d => { d.w = predWeeks; }); // 周数取【预测月】实际自然周数，不再沿用参考月
       $('#dtPred').value = pm.year + ' 年 ' + pm.month + ' 月';
-      const res = computeKezuTarget(depts, state.C);
+      const res = App.kezuCompute.computeKezuTarget(depts, state.C);
       const { S, H, rows, commonW, sumFinal, completion, achieved, Gcfg } = res;
 
       // 当前 1V1 人数 = 数据源中最新一周（year/month/week 最大）的「1v1在读学员」
@@ -1771,7 +1751,7 @@
         return best ? best.v : null;
       })();
 
-      const src = dataSourceProd(state.year, state.month);
+      const src = App.kezuCompute.dataSourceProd(getMonthlyRecords(), null, state.year, state.month);
       let consistHtml;
       if (src == null) consistHtml = '<span class="tag warn">数据源无该月周报</span> <span class="preview-note">「1v1 月生产课时」校验需上传该月 DOS 周报。</span>';
       else { const diff = H - src, ok = Math.abs(diff) < 1; consistHtml = '最佳科组课时合计 <b>' + fmt(H) + '</b>　vs　数据源 1v1 月生产课时 <b>' + fmt(src) + '</b>　<span class="tag ' + (ok ? 'ok' : 'warn') + '">' + (ok ? '✓ 一致' : '⚠ 不一致') + '</span>'; }
@@ -1791,7 +1771,7 @@
       // 校区实时完成率：分子=已拉取(kezuActual)的实产合计，分母=月度生产目标(sumFinal)；
       // 直接以「已拉取数据」为准（不再按日历周次推算 reportWeek），未拉取的周不计入，
       // 避免误显示未来周（如「9月第2周」实际尚未拉取第2周数据）的完成率。
-      const whole = actualSummary(pm.year, pm.month, null);
+      const whole = App.kezuCompute.actualSummary(STORE.list('kezuActual'), pm.year, pm.month, null);
       const campusActual = whole.campusActual;
       const campusSched = whole.campusSched;
       const hasData = whole.hasData;
@@ -2386,50 +2366,6 @@
   // 6) 周度预测 = 月预测 / 周数；呈现周度 / 月度 / 完成率 / 达到级别
   // 7) 校区汇总
 
-  // 科组生产指标核心算法（「科组生产指标」tab 与「核心看板·科组生产预测」共用）
-  function computeKezuTarget(depts, C) {
-    const S = depts.reduce((a, d) => a + (d.s || 0), 0);
-    const H = depts.reduce((a, d) => a + (d.h || 0), 0);
-    const rows = depts.map(d => {
-      const w = d.w > 0 ? d.w : 4;             // 月周数（缺失按 4 周兜底，与看板一致）；可在最佳科组提取
-      const a = S > 0 ? d.s / S : 0;          // A 法占比（单科占比）
-      const b = H > 0 ? d.h / H : 0;          // B 法占比（课时占比）
-      const predA = a * C;
-      const predB = b * C;
-      const avg = (predA + predB) / 2;         // ③ 两步均值（预测课时数）
-      // ④ 预测周平均 = 对应课时数 / 对应单科数 / 对应月周数
-      const wAvg = d.s > 0 ? avg / d.s / w : 0;
-      return { name: d.name, s: d.s, h: d.h, w, a, b, predA, predB, avg, wAvg };
-    });
-    // 分母 = Σ(单科数 × 月周数)；周数相同时退化为 Σ单科数
-    const denom = rows.reduce((a, r) => a + (r.s || 0) * r.w, 0);
-    const meanW = rows.reduce((x, r) => x + r.wAvg, 0) / (rows.length || 1);
-    const sum0 = meanW * denom;
-    const lower = denom > 0 ? C / denom : 0;
-    const upper = denom > 0 ? (C + 30) / denom : 0;
-    let commonW = meanW;
-    let adjNote;
-    if (denom <= 0) adjNote = '单科数×周数合计为 0，无法计算。';
-    else if (sum0 < C) { commonW = lower; adjNote = '四科组预测之和（' + fmt(sum0) + '）＜ C，已上调共同周平均至区间下界，使之和达到 C。'; }
-    else if (sum0 > C + 30) { commonW = upper; adjNote = '四科组预测之和（' + fmt(sum0) + '）＞ C+30，已压回区间上界。'; }
-    else { adjNote = '四科组预测之和（' + fmt(sum0) + '）已落在 [C, C+30] 区间内，共同周平均取四科组均值。'; }
-    const sumFinal = commonW * denom;
-    const completion = C > 0 ? sumFinal / C : 0;
-    let achieved = '未达标';
-    if (completion >= 1.25) achieved = 'G3';
-    else if (completion >= 1.10) achieved = 'G2';
-    else if (completion >= 1.00) achieved = 'G1';
-    const Gcfg = { G1: 1.00, G2: 1.10, G3: 1.25 };
-    rows.forEach(r => {
-      r.final = commonW * r.s * r.w;          // 最终月度预测 = 共同周平均 × 单科 × 周数
-      r.weekly = r.w > 0 ? r.final / r.w : 0; // 周度生产预测 = 月度预测 / 周数
-      const share = (r.s * r.w) / (denom || 1); // 按 单科×周数 分配（周数相同即按单科）
-      r.G1 = (C * Gcfg.G1) * share;
-      r.G2 = (C * Gcfg.G2) * share;
-      r.G3 = (C * Gcfg.G3) * share;
-    });
-    return { S, H, rows, meanW, sum0, lower, upper, commonW, adjNote, sumFinal, completion, achieved, Gcfg };
-  }
 
   // 解析「科组每周实际生产 / 预排」Excel/CSV（长表：周次 × 科组 × 实际预排 × 实际生产）
   function parseActualFile(file) {
@@ -2856,9 +2792,9 @@
 
     function recompute() {
       const C = state.C;
-      const res = computeKezuTarget(state.depts, C);
+      const res = App.kezuCompute.computeKezuTarget(state.depts, C);
       const S = res.S, H = res.H, rows = res.rows;
-      const src = dataSourceProd(state.year, state.month);
+      const src = App.kezuCompute.dataSourceProd(getMonthlyRecords(), null, state.year, state.month);
 
       // 数据源一致性校验（步骤②）
       let consistHtml;
@@ -3032,7 +2968,7 @@
       const tw = $('#atTrackWrap'); if (!tw) return;
       const { y: py, m: pm } = predictedYM();
       const ymEl = $('#atYM'); if (ymEl) ymEl.textContent = py + ' 年 ' + pm + ' 月';
-      const res = computeKezuTarget(state.depts, state.C);
+      const res = App.kezuCompute.computeKezuTarget(state.depts, state.C);
       const rows = res.rows;
       const actuals = STORE.list('kezuActual').filter(r => r.year === py && r.month === pm);
       const bySubj = {};
